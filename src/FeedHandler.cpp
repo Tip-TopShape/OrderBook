@@ -43,7 +43,7 @@ bool FeedHandler:: match(std::unique_ptr<Order> &nOrder, const char &type) {
     auto afterQty = price;
     switch (type) {
         case 'B': {
-            if (Bids.empty())
+            if (Sells.empty())
                 return false;
             auto it = Sells.begin(); // cheapest available
             // while price is less than or equal to new orders bid
@@ -67,7 +67,6 @@ bool FeedHandler:: match(std::unique_ptr<Order> &nOrder, const char &type) {
                         // remove order
                         // what if sell order traded before?
                         logOrder("S", currOrder->_originalQty, currOrder->_price);
-                        currOrder.reset();
                         it->second.pop_front(); // remove it fro
                         // TODO: log the trade
                     }
@@ -75,7 +74,6 @@ bool FeedHandler:: match(std::unique_ptr<Order> &nOrder, const char &type) {
                     // if new order is complete
                     if (nOrder->_qty == 0) {
                         orderComplete = true;
-                        nOrder.reset();
                         logOrder("B", nOrder->_originalQty, nOrder->_price );
                         // TODO: log the trade
                         break;
@@ -85,7 +83,10 @@ bool FeedHandler:: match(std::unique_ptr<Order> &nOrder, const char &type) {
 
                 // if we no longer have orders at this price
                 if (it->second.empty()) {
-                    Bids.erase(it);
+                    auto victim = it;
+                    ++it;
+                    Sells.erase(victim);
+                    continue;
                 }
 
                 if (orderComplete) {
@@ -118,7 +119,6 @@ bool FeedHandler:: match(std::unique_ptr<Order> &nOrder, const char &type) {
                     if (currOrder->_qty == 0) {
                         // remove order
                         logOrder("B", currOrder->_originalQty, currOrder->_price);
-                        currOrder.reset();
                         it->second.pop_front();
                         // TODO: log the trade
                     }
@@ -126,7 +126,6 @@ bool FeedHandler:: match(std::unique_ptr<Order> &nOrder, const char &type) {
                     // if new order is complete
                     if (nOrder->_qty == 0) {
                         orderComplete = true;
-                        nOrder.reset();
                         logOrder("S", nOrder->_originalQty, nOrder->_price );
                         // TODO: log the trade
                         break;
@@ -135,7 +134,10 @@ bool FeedHandler:: match(std::unique_ptr<Order> &nOrder, const char &type) {
                 }
                 // if we no longer have orders at this price
                 if (it->second.empty()) {
-                    Sells.erase(it);
+                    auto victim = it;
+                    ++it;
+                    Bids.erase(victim);
+                    continue;
                 }
                 if (orderComplete) {
                     // logOrder(std::to_string(type), nOrder->_qty, nOrder->_qty);
@@ -143,7 +145,7 @@ bool FeedHandler:: match(std::unique_ptr<Order> &nOrder, const char &type) {
                 }
 
 
-                ++it;
+                ++it; // BAD because I already erased it!!!
             }
             break;
         }
@@ -157,19 +159,19 @@ void FeedHandler::addOrder(std::unique_ptr<Order> &order, char &type) {
     // no imediate match, add to queue
 
     if (type == 'B') {
-        if (Bids.find(order->_qty) == Bids.end()) {
+        if (Bids.find(order->_price) == Bids.end()) {
             pOrders q;
             q.emplace_back(std::move(order));
-            Bids[order->_qty] = std::move(q);
-        } else Bids[order->_qty].push_back(std::move(order));
+            Bids[order->_price] = std::move(q);
+        } else Bids[order->_price].push_back(std::move(order));
     }
     else if (type == 'S') {
-        if (Sells.find(order->_qty) == Sells.end()) {
+        if (Sells.find(order->_price) == Sells.end()) {
             pOrders q;
             q.emplace_back(std::move(order));
-            Sells[order->_qty] = std::move(q);
+            Sells[order->_price] = std::move(q);
         }
-        else Sells[order->_qty].push_back(std::move(order));
+        else Sells[order->_price].push_back(std::move(order));
     }
 }
 
@@ -194,7 +196,7 @@ void FeedHandler::processMessage(const std::string &line) {
     // if modify -> it's already in the queue so don't try to rematch
     // if remove -> immediately destroy order
 
-    if (type == 'A') {
+    if (action == 'A') {
         // begin matching
         bool isMatched = match(pOrder, type);
         if (!isMatched) {
@@ -243,7 +245,6 @@ void FeedHandler::handleAction(char &action, std::unique_ptr<Order> &pOrder, con
             for (auto it = Bids[pOrder->_price].begin(); it != Bids[pOrder->_price].end(); ++it) {
                 if ((*it)->_orderId == pOrder->_orderId) {
                     // destroy order
-                    (*it).reset();
                     Bids[pOrder->_price].erase(it);
                     break;
                 }
@@ -283,13 +284,11 @@ void FeedHandler::printCurrentOrderBook(std::ostream &os) const  {
     std::vector<int> pad = {8, 8, 5, 8, 8, 5};
 
     // continue while there's bids or sells
-    while (sellPrice != Sells.end() || bidPrice != Bids.end())
-    {
+    bool flagA = ( bidPrice != Bids.end() ); // if we have bids
+    bool flagB = ( sellPrice != Sells.end() ); // if we have sells
+    while (flagA || flagB) {
         std::vector<int> vec;
         // os << "\n";
-
-        bool flagA = ( bidPrice != Bids.end() );
-        bool flagB = ( sellPrice != Sells.end() );
 
         std::deque<std::unique_ptr<Order>>::const_iterator bidOrder;
         std::deque<std::unique_ptr<Order>>::const_iterator sellOrder;
@@ -311,32 +310,30 @@ void FeedHandler::printCurrentOrderBook(std::ostream &os) const  {
         if (flagA || flagB) {
             // TODO: can't grab the .end() of an empty deque
 
-            while (flagA || flagB) {
+            bool flagC = ( bidOrder != bidPrice->second.end() );
+            bool flagD = ( sellOrder != sellPrice->second.end() );
+
+            while (flagC || flagD) {
+                // while we have bids or sells
                 // os << (*it)->_orderId << " ";
                 // os << (*it)->_qty << " ";
                 // os << (*it)->_price << " \n";
-                bool const flagC = ( !bidPrice->second.empty() );
-                bool const flagD = ( !sellPrice->second.empty() );
 
                 if (flagA && flagC) {
                     vec.emplace_back((*bidOrder)->_orderId);
                     vec.emplace_back((*bidOrder)->_qty);
                     vec.emplace_back((*bidOrder)->_price);
-                    if (bidOrder != bidPrice->second.end())
-                        ++bidOrder;
                 }
                 else {
                     vec.emplace_back(0);
                     vec.emplace_back(0);
                     vec.emplace_back(0);
                 }
-    
+
                 if (flagB && flagD) {
                     vec.emplace_back((*sellOrder)->_orderId);
                     vec.emplace_back((*sellOrder)->_qty);
                     vec.emplace_back((*sellOrder)->_price);
-                    if (sellOrder != sellPrice->second.end())
-                        ++sellOrder;
                 }
                 else {
                     vec.emplace_back(0);
@@ -352,10 +349,22 @@ void FeedHandler::printCurrentOrderBook(std::ostream &os) const  {
                 }
                 os << "\n";
 
-                flagA = ( bidPrice != Bids.end() );
-                flagB = ( sellPrice != Sells.end() );
+                if (flagC)
+                    ++bidOrder;
+                if (flagD)
+                    ++sellOrder;
+
+                flagC = ( bidOrder != bidPrice->second.end() ); // do we still have bids at this price?
+                flagD = ( sellOrder != sellPrice->second.end() ); // do we still have sells at this price?
             }
         }
+
+        if (flagA)
+            ++bidPrice;
+        if (flagB)
+            ++sellPrice;
+        flagA = ( bidPrice != Bids.end() );
+        flagB = ( sellPrice != Sells.end() );
     }
 }
 
