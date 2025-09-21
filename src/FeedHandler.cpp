@@ -67,7 +67,7 @@ bool FeedHandler:: match(std::unique_ptr<Order> &nOrder, const char &type) {
                         // remove order
                         // what if sell order traded before?
                         logOrder("S", currOrder->_originalQty, currOrder->_price);
-                        it->second.pop_front(); // remove it fro
+                        it->second.pop_front(); // remove it from
                         // TODO: log the trade
                     }
 
@@ -269,7 +269,7 @@ void FeedHandler::printCurrentOrderBook(std::ostream &os) const  {
     auto sellPrice = Sells.begin();
     // VariadicTable<int, int, int32_t> vtBids({"order Id", "quantity", "price"});
     // VariadicTable<int, int, int32_t> vtSells({"order Id", "quantity", "price"});
-    os << "|order Id"; // 8 pad
+    os << "|order Id"; // 8 pad s
     os << "  |";
     os << "quantity"; // 8 pad
     os << "  |";
@@ -294,24 +294,22 @@ void FeedHandler::printCurrentOrderBook(std::ostream &os) const  {
         std::deque<std::unique_ptr<Order>>::const_iterator sellOrder;
         // auto sellOrder = sellPrice->second.begin();
 
-        if (!bidPrice->second.empty()) {
+        if (flagA && !bidPrice->second.empty()) {
             bidOrder = bidPrice->second.begin();
-        } else {
-            bidOrder = bidPrice->second.end();
         }
+        // if not then we should NOT use it
 
-        if (!sellPrice->second.empty()) {
+        if (flagB && !sellPrice->second.empty()) {
             sellOrder = sellPrice->second.begin();
-        } else {
-            sellOrder = sellPrice->second.end();
         }
+        // if not then we should NOT use it
 
         // same as while statement
         if (flagA || flagB) {
             // TODO: can't grab the .end() of an empty deque
 
-            bool flagC = ( bidOrder != bidPrice->second.end() );
-            bool flagD = ( sellOrder != sellPrice->second.end() );
+            bool flagC = ( flagA && bidOrder != bidPrice->second.end() );
+            bool flagD = ( flagB && sellOrder != sellPrice->second.end() );
 
             while (flagC || flagD) {
                 // while we have bids or sells
@@ -354,8 +352,8 @@ void FeedHandler::printCurrentOrderBook(std::ostream &os) const  {
                 if (flagD)
                     ++sellOrder;
 
-                flagC = ( bidOrder != bidPrice->second.end() ); // do we still have bids at this price?
-                flagD = ( sellOrder != sellPrice->second.end() ); // do we still have sells at this price?
+                flagC = ( flagA && bidOrder != bidPrice->second.end() ); // do we still have bids at this price?
+                flagD = ( flagB && sellOrder != sellPrice->second.end() ); // do we still have sells at this price?
             }
         }
 
