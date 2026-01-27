@@ -1,0 +1,62 @@
+# Build directories
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Third-party libraries (fetched via CMake FetchContent)
+_deps/
+external/
+third_party/
+vendor/
+libs/
+databento*/
+!dashboard/  # Keep dashboard directory
+
+# Compiled executable
+OrderBook_v2
+
+# Market data files (large Databento datasets)
+12152025/
+XNAS-*/
+*.dbn.zst
+*.dbn
+
+# Analysis outputs
+*.xlsx
+*.png
+*.csv
+
+# Python virtual environment
+dashboard/env/
+dashboard/__pycache__/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# macOS
+.DS_Store
+*.dSYM/
+entitlements.plist
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.cproject
+.settings/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
