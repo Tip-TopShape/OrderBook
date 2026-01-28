@@ -24,7 +24,7 @@ struct Order {
     int64_t id;
     uint32_t qty;
     char side;
-    std::unique_ptr<Order> next;
+    std::unique_ptr<Order> _next;
 
     // std::basic_string<char> symbol;
     databento::UnixNanos ts;
@@ -39,7 +39,7 @@ using order = std::unique_ptr<Order>;
 constexpr static int MAX_SIZE = 100;
 class priceLevel {
 private:
-    std::vector<order> levels;// = std::vector<order>(MAX_SIZE);
+    std::vector<order> levels = std::vector<order>(MAX_SIZE);
 
     std::atomic<int> start = 0; // start of the buffer
     std::atomic<int> next = 0;
