@@ -65,9 +65,35 @@ private:
     MatchingMetrics metrics_;
 
     // Helper methods for vector-based market access
-    symbolPriceVector* findSymbolInBuys(std::basic_string<char> &symbol);
-    symbolPriceVector* findSymbolInSells(std::basic_string<char> &symbol);
-    int findPriceInVector(symbolPriceVector &vec, int64_t price, bool isAscending);
+    symbolPriceVector* findSymbolInBuys(const std::basic_string<char> &symbol);
+    symbolPriceVector* findSymbolInSells(const std::basic_string<char> &symbol);
+
+    symbolPriceVector* getSymbolPriceLevel(const std::basic_string<char> &symbol, databento::Side side) {
+        if (side == databento::Side::Ask) {
+            auto sellsForSymbol = findSymbolInSells(symbol);
+            return sellsForSymbol;
+        }
+
+        auto buysForSymbol = findSymbolInBuys(symbol);
+        return buysForSymbol;
+    }
+    int getPriceLevelIdx(const symbolPriceVector &vec, int64_t price, bool isAscending) {
+        if (isAscending) {
+            auto it = std::lower_bound(vec.begin(), vec.end(), price,
+                [](const auto &pair, int64_t p) { return pair.first < p; });
+            if (it != vec.end() && it->first == price) {
+                return std::distance(vec.begin(), it);
+            }
+        } else {
+            auto it = std::lower_bound(vec.begin(), vec.end(), price,
+                [](const auto &pair, int64_t p) { return pair.first > p; });
+            if (it != vec.end() && it->first == price) {
+                return std::distance(vec.begin(), it);
+            }
+        }
+        return -1;
+    }
+
 
     // order by id
     order HEAD;
@@ -115,7 +141,7 @@ public:
 
     // rebuild methods
     void addOrder(order &entry, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
-    void cancelOrder(uint64_t &id, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
+    void cancelOrder(const uint64_t &id, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
 
     void prep(std::vector<std::basic_string<char>> &symbols) {
         for (std::basic_string<char> symbol : symbols) {

@@ -7,7 +7,7 @@
 #include <iomanip>
 
 // Helper method to find or create a symbol entry in the buys market
-FeedHandler::symbolPriceVector* FeedHandler::findSymbolInBuys(std::basic_string<char> &symbol) {
+FeedHandler::symbolPriceVector* FeedHandler::findSymbolInBuys(const std::basic_string<char> &symbol) {
     auto comp = [&symbol](const auto &pair) { return pair.first < symbol; };
     auto it = std::lower_bound(
         buys.begin(), buys.end(), symbol,
@@ -23,7 +23,7 @@ FeedHandler::symbolPriceVector* FeedHandler::findSymbolInBuys(std::basic_string<
 }
 
 // Helper method to find or create a symbol entry in the sells market
-FeedHandler::symbolPriceVector* FeedHandler::findSymbolInSells(std::basic_string<char> &symbol) {
+FeedHandler::symbolPriceVector* FeedHandler::findSymbolInSells(const std::basic_string<char> &symbol) {
     auto it = std::lower_bound(
         sells.begin(), sells.end(), symbol,
         [](const auto& pair, const auto& value) { return pair.first < value; }
@@ -38,25 +38,6 @@ FeedHandler::symbolPriceVector* FeedHandler::findSymbolInSells(std::basic_string
     return &sells.back().second;
 }
 
-// Helper method to find price position in a vector (binary search)
-// Returns index if found, -1 if not found
-// isAscending: true for buy side (ascending), false for sell side (descending)
-int FeedHandler::findPriceInVector(symbolPriceVector &vec, int64_t price, bool isAscending) {
-    if (isAscending) {
-        auto it = std::lower_bound(vec.begin(), vec.end(), price,
-            [](const auto &pair, int64_t p) { return pair.first < p; });
-        if (it != vec.end() && it->first == price) {
-            return std::distance(vec.begin(), it);
-        }
-    } else {
-        auto it = std::lower_bound(vec.begin(), vec.end(), price,
-            [](const auto &pair, int64_t p) { return pair.first > p; });
-        if (it != vec.end() && it->first == price) {
-            return std::distance(vec.begin(), it);
-        }
-    }
-    return -1;
-}
 
 void FeedHandler::printCurrentOrderBook(std::ostream &os) const  {
 
@@ -95,13 +76,12 @@ void FeedHandler::processOrder(uint64_t &id, databento::Side &side, std::basic_s
         case databento::Action::Clear:
             break;
         case databento::Action::Modify:
-
             break;
         case databento::Action::Cancel:
-            // this->cancelOrder(id, side, price, symbol);
-            return;
+            this->cancelOrder(id, side, price, symbol);
+            break;
         default:
-            return;
+            break;
     }
     // this->match(newOrder, side, price, symbol);
 
@@ -132,7 +112,10 @@ void FeedHandler::match(order &entry, databento::Side &side, int64_t &price, std
             int64_t top_price = pricePoint.first;
 
             if (top_price <= price && !pricePoint.second.first->isEmpty()) {  // Match condition: ask price <= bid price
-                auto &match = pricePoint.second.first->top();
+                auto match = pricePoint.second.first->top();
+                if (nullptr == match) {
+                    continue; //top ordered was canceled earlier
+                }
                 uint32_t fillQty = std::min(entry->qty, match->qty);
                 matchedQty += fillQty;
                 ++ordersMatchedThisCall;
@@ -154,7 +137,6 @@ void FeedHandler::match(order &entry, databento::Side &side, int64_t &price, std
                 // If matched order is filled
                 if (match->qty == 0) {
                     pricePoint.second.first->latestOrderFilled();
-                    match.reset();
                     if (pricePoint.second.first->isEmpty()) {
                         sellsForSymbol->erase(sellsForSymbol->begin());
                     }
@@ -180,7 +162,10 @@ void FeedHandler::match(order &entry, databento::Side &side, int64_t &price, std
             int64_t top_price = pricePoint.first;
 
             if (top_price >= price && !pricePoint.second.first->isEmpty()) {  // Match condition: bid price >= ask price
-                auto &match = pricePoint.second.first->top();
+                auto match = pricePoint.second.first->top();
+                if (nullptr == match) {
+                    continue; //top ordered was canceled earlier
+                }
                 uint32_t fillQty = std::min(entry->qty, match->qty);
                 matchedQty += fillQty;
                 ++ordersMatchedThisCall;
@@ -202,7 +187,6 @@ void FeedHandler::match(order &entry, databento::Side &side, int64_t &price, std
                 // If matched order is filled
                 if (match->qty == 0) {
                     pricePoint.second.first->latestOrderFilled();
-                    match.reset();
                     if (pricePoint.second.first->isEmpty()) {
                         buysForSymbol->pop_back();
                     }
@@ -292,8 +276,12 @@ void FeedHandler::addOrder(order &entry, databento::Side &side, int64_t &price, 
     }
 }
 
-void FeedHandler::cancelOrder(uint64_t &id, databento::Side &side, int64_t &price, std::basic_string<char> &symbol) {
-
+void FeedHandler::cancelOrder(const uint64_t &id, databento::Side &side, int64_t &price, std::basic_string<char> &symbol) {
+    auto vec  = getSymbolPriceLevel(symbol, side); // get prices for symbol
+    bool isAscending = side == databento::Side::Bid ? false : true; // greater or less comparator
+    auto idx = getPriceLevelIdx(*vec, price, isAscending); // pull price level for given price
+    if (idx != -1)
+        (*vec)[idx].second.first->cancel(id); // mark it as cancel
 }
 
 void FeedHandler::updateMemoryMetrics() {

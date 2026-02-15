@@ -40,6 +40,7 @@ constexpr static int MAX_SIZE = 100;
 class priceLevel {
 private:
     std::vector<order> levels = std::vector<order>(MAX_SIZE);
+    std::unordered_set<int64_t>  canceledOrders;
 
     std::atomic<int> start = 0; // start of the buffer
     std::atomic<int> next = 0;
@@ -48,7 +49,9 @@ private:
 public:
     enum class STATUS { BELOW, OVER };
 
-    priceLevel() {}
+    priceLevel() {
+        canceledOrders.reserve(MAX_SIZE);
+    }
     bool isEmpty() {
         if (_size == 0) {
             return true;
@@ -56,6 +59,11 @@ public:
 
 
         return false;
+    }
+
+    void cancel(int64_t id) {
+        canceledOrders.insert(id);
+        canceledOrders.erase(id);
     }
 
     void incrementStart() {
@@ -70,7 +78,8 @@ public:
     }
 
     void latestOrderFilled() {
-        pop_top();
+        levels[start].reset();
+        postReset();
     }
 
     size_t size() {
@@ -84,26 +93,26 @@ public:
 
         levels[next] = std::move(entry);
         ++next;
-        if (next >= MAX_SIZE) {
-            // loop back
-            next = 0;
-        }
+        next = next % MAX_SIZE; // loop back using modulo
         ++_size;
+
+
+
         return _size < MAX_SIZE ? STATUS::BELOW : STATUS::OVER;
 
     }
 
-    order& top() {
-        return levels[start];
+    Order* top() {
+        while (canceledOrders.find(levels[start]->id) != canceledOrders.end()) {
+            latestOrderFilled();
+        }
+        return levels[start].get();
     }
 
-    void pop_top() {
+    void postReset() {
         --_size; // removed an order
         ++start;
-        if (start >= MAX_SIZE) {
-            // loop back
-            start = 0;
-        }
+        start = start % MAX_SIZE; // loop back using modulo
     }
 
     size_t memoryFootprint() const {
