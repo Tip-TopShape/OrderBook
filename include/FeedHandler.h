@@ -29,6 +29,8 @@
 #include <array>              // Fixed-size arrays
 #include <cstdint>            // Fixed-width integers
 #include <algorithm>          // std::sort, std::lower_bound
+
+#include "RBTree.h"
 // #include <memory>             // Smart pointers
 //
 // // CSV Parsing
@@ -52,23 +54,27 @@ private:
     // ts_recv,ts_event,rtype,publisher_id,instrument_id,action,side,
     // depth,price,size,flags,ts_in_delta,sequence,symb ol
 
+    // a symbol's container
+    using pricePoint = std::unique_ptr<priceLevel>;
+    // using symbolPrices = std::vector<pricePoint> ;  // pre-allocated vector of price levels
+    using symbolPrices = RBTree<int64_t, priceLevel>;
 
-    using level = std::pair<std::unique_ptr<priceLevel>, priceLevel::STATUS>;
-    using pricePoint = std::pair<int64_t, level>;  // (price, level)
-    using symbolPriceVector = std::vector<pricePoint> ;  // pre-allocated vector of price levels
-    using buyMarket = std::vector<std::pair<std::basic_string<char>, symbolPriceVector>>;  // symbol -> sorted prices (ascending for buys)
-    using sellMarket = std::vector<std::pair<std::basic_string<char>, symbolPriceVector>>;  // symbol -> sorted prices (descending for sells)
+    // buy and sell side
+    using listing = std::pair<std::basic_string<char>, symbolPrices>;
+    using buyMarket = std::vector<listing>;  // symbol -> sorted prices (ascending for buys)
+    using sellMarket = std::vector<listing>;  // symbol -> sorted prices (descending for sells)
 
     buyMarket buys; // best bid -> highest priced order
     sellMarket sells; // best ask -> lowest priced order
+    std::unordered_set<uint64_t> canceled;
 
     MatchingMetrics metrics_;
 
     // Helper methods for vector-based market access
-    symbolPriceVector* findSymbolInBuys(const std::basic_string<char> &symbol);
-    symbolPriceVector* findSymbolInSells(const std::basic_string<char> &symbol);
+    symbolPrices* findSymbolInBuys(const std::basic_string<char> &symbol);
+    symbolPrices* findSymbolInSells(const std::basic_string<char> &symbol);
 
-    symbolPriceVector* getSymbolPriceLevel(const std::basic_string<char> &symbol, databento::Side side) {
+    symbolPrices* getSymbolPriceLevel(const std::basic_string<char> &symbol, databento::Side side) {
         if (side == databento::Side::Ask) {
             auto sellsForSymbol = findSymbolInSells(symbol);
             return sellsForSymbol;
@@ -76,22 +82,6 @@ private:
 
         auto buysForSymbol = findSymbolInBuys(symbol);
         return buysForSymbol;
-    }
-    int getPriceLevelIdx(const symbolPriceVector &vec, int64_t price, bool isAscending) {
-        if (isAscending) {
-            auto it = std::lower_bound(vec.begin(), vec.end(), price,
-                [](const auto &pair, int64_t p) { return pair.first < p; });
-            if (it != vec.end() && it->first == price) {
-                return std::distance(vec.begin(), it);
-            }
-        } else {
-            auto it = std::lower_bound(vec.begin(), vec.end(), price,
-                [](const auto &pair, int64_t p) { return pair.first > p; });
-            if (it != vec.end() && it->first == price) {
-                return std::distance(vec.begin(), it);
-            }
-        }
-        return -1;
     }
 
 
@@ -112,7 +102,7 @@ public:
     void increment() {
         ++counter;
     }
-
+/*-----------------------Metrics------------------------------ BEGIN*/
     MatchingMetrics& getMetrics() { return metrics_; }
     const MatchingMetrics& getMetrics() const { return metrics_; }
     void updateMemoryMetrics();
@@ -125,7 +115,7 @@ public:
 
     void printCurrentOrderBook(std::ostream &os) const;
     void reader(std::string filename);
-
+    /*-----------------------Metrics------------------------------ END*/
 
     void processOrder(
         uint64_t &id,
@@ -141,14 +131,13 @@ public:
 
     // rebuild methods
     void addOrder(order &entry, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
-    void cancelOrder(const uint64_t &id, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
+    void cancelOrder(const uint64_t &id);
 
     void prep(std::vector<std::basic_string<char>> &symbols) {
         for (std::basic_string<char> symbol : symbols) {
-            buys.push_back( {symbol, symbolPriceVector()} );
-            buys.back().second;
-            sells.push_back( {symbol, symbolPriceVector()} );
-            sells.back().second;
+            auto treeOfPriceLevels = std::make_unique<symbolPrices>();
+            buys.push_back({symbol, symbolPrices()});
+            sells.push_back({symbol, symbolPrices()});
         }
     }
 };

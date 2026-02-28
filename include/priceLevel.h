@@ -40,18 +40,12 @@ constexpr static int MAX_SIZE = 100;
 class priceLevel {
 private:
     std::vector<order> levels = std::vector<order>(MAX_SIZE);
-    std::unordered_set<int64_t>  canceledOrders;
-
     std::atomic<int> start = 0; // start of the buffer
     std::atomic<int> next = 0;
     size_t _size = 0;
 
 public:
-    enum class STATUS { BELOW, OVER };
-
-    priceLevel() {
-        canceledOrders.reserve(MAX_SIZE);
-    }
+    priceLevel() {}
     bool isEmpty() {
         if (_size == 0) {
             return true;
@@ -59,11 +53,6 @@ public:
 
 
         return false;
-    }
-
-    void cancel(int64_t id) {
-        canceledOrders.insert(id);
-        canceledOrders.erase(id);
     }
 
     void incrementStart() {
@@ -82,30 +71,27 @@ public:
         postReset();
     }
 
+    void processCancel() {
+        // same as latestOrderFilled, created for clarity
+        latestOrderFilled();
+    }
+
     size_t size() {
         return _size;
     }
 
-    STATUS push(order &entry) {
+    void push(order &entry) {
         if (this->size() == MAX_SIZE) {
-            return STATUS::OVER;
+            return;
         }
 
         levels[next] = std::move(entry);
         ++next;
         next = next % MAX_SIZE; // loop back using modulo
         ++_size;
-
-
-
-        return _size < MAX_SIZE ? STATUS::BELOW : STATUS::OVER;
-
     }
 
     Order* top() {
-        while (canceledOrders.find(levels[start]->id) != canceledOrders.end()) {
-            latestOrderFilled();
-        }
         return levels[start].get();
     }
 

@@ -7,7 +7,7 @@
 #include <iomanip>
 
 // Helper method to find or create a symbol entry in the buys market
-FeedHandler::symbolPriceVector* FeedHandler::findSymbolInBuys(const std::basic_string<char> &symbol) {
+FeedHandler::symbolPrices* FeedHandler::findSymbolInBuys(const std::basic_string<char> &symbol) {
     auto comp = [&symbol](const auto &pair) { return pair.first < symbol; };
     auto it = std::lower_bound(
         buys.begin(), buys.end(), symbol,
@@ -18,12 +18,12 @@ FeedHandler::symbolPriceVector* FeedHandler::findSymbolInBuys(const std::basic_s
     }
 
     // Create new symbol entry if not found
-    buys.push_back({symbol, symbolPriceVector()});
+    buys.push_back({symbol, symbolPrices()});
     return &buys.back().second;
 }
 
 // Helper method to find or create a symbol entry in the sells market
-FeedHandler::symbolPriceVector* FeedHandler::findSymbolInSells(const std::basic_string<char> &symbol) {
+FeedHandler::symbolPrices* FeedHandler::findSymbolInSells(const std::basic_string<char> &symbol) {
     auto it = std::lower_bound(
         sells.begin(), sells.end(), symbol,
         [](const auto& pair, const auto& value) { return pair.first < value; }
@@ -34,7 +34,7 @@ FeedHandler::symbolPriceVector* FeedHandler::findSymbolInSells(const std::basic_
     }
 
     // Create new symbol entry if not found
-    sells.push_back({symbol, symbolPriceVector()});
+    sells.push_back({symbol, symbolPrices()});
     return &sells.back().second;
 }
 
@@ -66,7 +66,15 @@ void FeedHandler::reader(std::string filename) {
     }
 }
 
-void FeedHandler::processOrder(uint64_t &id, databento::Side &side, std::basic_string<char> &symbol, databento::Action &action, int64_t &price, uint32_t &qty, databento::UnixNanos &ts_recv, databento::TimeDeltaNanos &ts_event) {
+void FeedHandler::processOrder(uint64_t &id,
+                                databento::Side &side,
+                                std::basic_string<char> &symbol,
+                                databento::Action &action,
+                                int64_t &price,
+                                uint32_t &qty,
+                                databento::UnixNanos &ts_recv,
+                                databento::TimeDeltaNanos &ts_event)
+{
 
     order newOrder = std::make_unique<Order>( Order(ts_recv, ts_event, side, qty) );
     switch (action) {
@@ -78,7 +86,7 @@ void FeedHandler::processOrder(uint64_t &id, databento::Side &side, std::basic_s
         case databento::Action::Modify:
             break;
         case databento::Action::Cancel:
-            this->cancelOrder(id, side, price, symbol);
+            this->cancelOrder(id);
             break;
         default:
             break;
@@ -108,12 +116,12 @@ void FeedHandler::match(order &entry, databento::Side &side, int64_t &price, std
 
         while (!fufilled && !sellsForSymbol->empty()) {
             // For sell side, prices are in descending order, so first element is lowest ask
-            auto &pricePoint = sellsForSymbol->front();
-            int64_t top_price = pricePoint.first;
-
-            if (top_price <= price && !pricePoint.second.first->isEmpty()) {  // Match condition: ask price <= bid price
-                auto match = pricePoint.second.first->top();
-                if (nullptr == match) {
+            auto pricePoint = sellsForSymbol->getMin();
+            // I now have pricePoint, the head of the tree at this price
+            if (pricePoint->price <= price && !pricePoint->level->isEmpty()) {  // Match condition: ask price <= bid price
+                auto match = pricePoint->level->top();
+                if (canceled.find(match->id) != canceled.end()) {
+                    pricePoint->level->processCancel();
                     continue; //top ordered was canceled earlier
                 }
                 uint32_t fillQty = std::min(entry->qty, match->qty);
@@ -136,9 +144,11 @@ void FeedHandler::match(order &entry, databento::Side &side, int64_t &price, std
 
                 // If matched order is filled
                 if (match->qty == 0) {
-                    pricePoint.second.first->latestOrderFilled();
-                    if (pricePoint.second.first->isEmpty()) {
-                        sellsForSymbol->erase(sellsForSymbol->begin());
+                    pricePoint->level->latestOrderFilled();
+                    --metrics_.book.sellOrders;
+                    if (pricePoint->level->isEmpty()) {
+                        sellsForSymbol->erase(pricePoint);
+                        --metrics_.book.sellPriceLevels;
                     }
                 }
             } else {
@@ -158,11 +168,14 @@ void FeedHandler::match(order &entry, databento::Side &side, int64_t &price, std
 
         while (!fufilled && !buysForSymbol->empty()) {
             // For buy side, prices are in ascending order, so last element is highest bid
-            auto &pricePoint = buysForSymbol->back();
-            int64_t top_price = pricePoint.first;
+            auto pricePoint = buysForSymbol->getMax();
 
-            if (top_price >= price && !pricePoint.second.first->isEmpty()) {  // Match condition: bid price >= ask price
-                auto match = pricePoint.second.first->top();
+            if (pricePoint->price >= price && !pricePoint->level->isEmpty()) {  // Match condition: bid price >= ask price
+                auto match = pricePoint->level->top();
+                if (canceled.find(match->id) != canceled.end()) {
+                    pricePoint->level->processCancel();
+                    continue; //top ordered was canceled earlier
+                }
                 if (nullptr == match) {
                     continue; //top ordered was canceled earlier
                 }
@@ -186,9 +199,11 @@ void FeedHandler::match(order &entry, databento::Side &side, int64_t &price, std
 
                 // If matched order is filled
                 if (match->qty == 0) {
-                    pricePoint.second.first->latestOrderFilled();
-                    if (pricePoint.second.first->isEmpty()) {
-                        buysForSymbol->pop_back();
+                    pricePoint->level->latestOrderFilled();
+                    --metrics_.book.buyOrders;
+                    if (pricePoint->level->isEmpty()) {
+                        buysForSymbol->erase(pricePoint);
+                        --metrics_.book.buyPriceLevels;
                     }
                 }
             } else {
@@ -229,88 +244,42 @@ void FeedHandler::match(order &entry, databento::Side &side, int64_t &price, std
 }
 void FeedHandler::addOrder(order &entry, databento::Side &side, int64_t &price, std::basic_string<char> &symbol) {
     if (side == databento::Side::Bid) {
-        auto buysForSymbol = findSymbolInBuys(symbol);
-
-        // Find the correct position to insert (maintain ascending order)
-        auto it = std::lower_bound(buysForSymbol->begin(), buysForSymbol->end(), price,
-            [](const auto &pair, int64_t p) { return pair.first < p; });
-
-        if (it != buysForSymbol->end() && it->first == price) {
-            // Price level exists
-            if (it->second.second == priceLevel::STATUS::BELOW) {
-                it->second.second = it->second.first->push(entry);
-            } else {
-                // use overflow buffer
-            }
-        } else {
-            // Create new price level
-            auto newLevel = std::make_unique<priceLevel>();
-            auto newPoint = std::make_pair(price, std::make_pair(std::move(newLevel), priceLevel::STATUS::BELOW));
-            it = buysForSymbol->insert(it, std::move(newPoint));
-            // Push the order to the newly created level
-            it->second.second = it->second.first->push(entry);
+        auto tree = findSymbolInBuys(symbol);
+        size_t sizeBefore = tree->size();
+        auto pricePoint = tree->find(price, tree->headIndex, nullptr);
+        pricePoint->level->push(entry);
+        if (tree->size() > sizeBefore) {
+            ++metrics_.book.buyPriceLevels;
         }
-    }
-    else if (side == databento::Side::Ask) {
-        auto sellsForSymbol = findSymbolInSells(symbol);
-
-        // Find the correct position to insert (maintain descending order)
-        auto it = std::lower_bound(sellsForSymbol->begin(), sellsForSymbol->end(), price,
-            [](const auto &pair, int64_t p) { return pair.first > p; });
-
-        if (it != sellsForSymbol->end() && it->first == price) {
-            // Price level exists
-            if (it->second.second == priceLevel::STATUS::BELOW) {
-                it->second.second = it->second.first->push(entry);
-            } else {
-                // use overflow buffer
-            }
-        } else {
-            // Create new price level
-            auto newLevel = std::make_unique<priceLevel>();
-            auto newPoint = std::make_pair(price, std::make_pair(std::move(newLevel), priceLevel::STATUS::BELOW));
-            it = sellsForSymbol->insert(it, std::move(newPoint));
-            // Push the order to the newly created level
-            it->second.second = it->second.first->push(entry);
+        ++metrics_.book.buyOrders;
+    } else {
+        auto tree = findSymbolInSells(symbol);
+        size_t sizeBefore = tree->size();
+        auto pricePoint = tree->find(price, tree->headIndex, nullptr);
+        pricePoint->level->push(entry);
+        if (tree->size() > sizeBefore) {
+            ++metrics_.book.sellPriceLevels;
         }
+        ++metrics_.book.sellOrders;
     }
 }
 
-void FeedHandler::cancelOrder(const uint64_t &id, databento::Side &side, int64_t &price, std::basic_string<char> &symbol) {
-    auto vec  = getSymbolPriceLevel(symbol, side); // get prices for symbol
-    bool isAscending = side == databento::Side::Bid ? false : true; // greater or less comparator
-    auto idx = getPriceLevelIdx(*vec, price, isAscending); // pull price level for given price
-    if (idx != -1)
-        (*vec)[idx].second.first->cancel(id); // mark it as cancel
+void FeedHandler::cancelOrder(const uint64_t &id) {
+    canceled.insert(id);
 }
 
 void FeedHandler::updateMemoryMetrics() {
     auto& mem = metrics_.memory;
-    mem.reset();
 
-    // Count buy side
+    // Use live counters - O(1)
     mem.buySymbols = buys.size();
-    for (const auto& [symbol, priceLevels] : buys) {
-        mem.buyPriceLevels += priceLevels.size();
-        for (const auto& [price, level] : priceLevels) {
-            if (level.first) {
-                mem.buyOrders += level.first->size();
-            }
-        }
-    }
-
-    // Count sell side
     mem.sellSymbols = sells.size();
-    for (const auto& [symbol, priceLevels] : sells) {
-        mem.sellPriceLevels += priceLevels.size();
-        for (const auto& [price, level] : priceLevels) {
-            if (level.first) {
-                mem.sellOrders += level.first->size();
-            }
-        }
-    }
+    mem.buyPriceLevels = metrics_.book.buyPriceLevels.load();
+    mem.sellPriceLevels = metrics_.book.sellPriceLevels.load();
+    mem.buyOrders = metrics_.book.buyOrders.load();
+    mem.sellOrders = metrics_.book.sellOrders.load();
 
-    // Estimate memory usage using sizeof() for durability against refactoring
+    // Estimate memory based on counts
     mem.estimatedBytes = calculateMemoryFootprint();
 }
 
@@ -320,31 +289,17 @@ size_t FeedHandler::calculateMemoryFootprint() const {
     // Base container overhead
     total += sizeof(buys) + sizeof(sells);
 
-    // Buy side
-    for (const auto& [symbol, priceLevels] : buys) {
-        total += sizeof(symbol);  // string storage
-        total += sizeof(priceLevels);                 // vector overhead
-        total += priceLevels.capacity() * sizeof(pricePoint);  // vector storage
+    // Per-symbol overhead (string + RBTree base)
+    size_t perSymbol = sizeof(std::string) + sizeof(symbolPrices);
+    total += (buys.size() + sells.size()) * perSymbol;
 
-        for (const auto& [price, level] : priceLevels) {
-            if (level.first) {
-                total += level.first->memoryFootprint();
-            }
-        }
-    }
+    // Per-price-level overhead (RBTree node + priceLevel)
+    size_t perPriceLevel = sizeof(symbolPrices::Node) + sizeof(priceLevel);
+    total += (metrics_.book.buyPriceLevels.load() + metrics_.book.sellPriceLevels.load()) * perPriceLevel;
 
-    // Sell side
-    for (const auto& [symbol, priceLevels] : sells) {
-        total += sizeof(symbol);
-        total += sizeof(priceLevels);
-        total += priceLevels.capacity() * sizeof(pricePoint);
-
-        for (const auto& [price, level] : priceLevels) {
-            if (level.first) {
-                total += level.first->memoryFootprint();
-            }
-        }
-    }
+    // Per-order overhead
+    size_t perOrder = sizeof(Order);
+    total += (metrics_.book.buyOrders.load() + metrics_.book.sellOrders.load()) * perOrder;
 
     return total;
 }

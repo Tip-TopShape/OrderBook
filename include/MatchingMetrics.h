@@ -56,6 +56,16 @@ struct MatchingMetrics {
     } symbolLookup;
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Book State (live counters - updated incrementally)
+    // ─────────────────────────────────────────────────────────────────────────
+    struct BookState {
+        std::atomic<uint64_t> buyOrders{0};
+        std::atomic<uint64_t> sellOrders{0};
+        std::atomic<uint64_t> buyPriceLevels{0};
+        std::atomic<uint64_t> sellPriceLevels{0};
+    } book;
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Memory Usage (snapshot - updated on demand)
     // ─────────────────────────────────────────────────────────────────────────
     struct MemoryUsage {
