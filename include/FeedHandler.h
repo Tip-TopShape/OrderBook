@@ -11,111 +11,125 @@
 #include <sstream>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 #include <chrono>
-// #include <ctime>
 #include <atomic>
 #include <iostream>
+#include <vector>
+#include <array>
+#include <cstdint>
+#include <algorithm>
+#include <utility>
+#include <sys/mman.h>
 
-#include <databento/constants.hpp>
-#include <databento/dbn.hpp>
-#include <databento/symbology.hpp>
-#include <databento/historical.hpp>
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS MAP_ANON
+#endif
 
 #include "../include/priceLevel.h"
 #include "../include/MatchingMetrics.h"
+#include "TickArray.h"
 
-#include <iostream>           // Basic I/O
-#include <vector>             // Dynamic arrays (fine for non-hot-path)
-#include <array>              // Fixed-size arrays
-#include <cstdint>            // Fixed-width integers
-#include <algorithm>          // std::sort, std::lower_bound
 
-#include "RBTree.h"
-// #include <memory>             // Smart pointers
-//
-// // CSV Parsing
-// #include <rapidcsv.h>         // Or write simple custom parser
-//
-// // Testing
-// #include <gtest/gtest.h>
-//
-// // Benchmarking
-// #include <benchmark/benchmark.h>
-//
-// // Optional: If doing complex stats
-// #include <Eigen/Dense>        // Linear algebra
-// #include <boost/math/distributions.hpp>  // Statistical distributions
+struct SymbolBook {
+    std::basic_string<char> symbol;
+    TickArray<int64_t, priceLevel> bids;
+    TickArray<int64_t, priceLevel> asks;
 
-static std::unordered_map<uint32_t, std::string> id_to_symbol;
+    bool operator<(const SymbolBook& other) const {
+        return symbol < other.symbol;
+    }
+};
+
+template <typename T, size_t CAPACITY>
+struct Pool {
+    T*   storage; // pool of orders
+    uint32_t freelist[CAPACITY];
+    uint32_t freelist_top;
+
+    Pool() : freelist_top(CAPACITY) {
+        for (uint32_t i = 0; i < CAPACITY; ++i) {
+            freelist[i] = i;
+        }
+
+        storage = static_cast<T*>(mmap(
+            nullptr,
+            CAPACITY * sizeof(T),
+            PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANONYMOUS,
+            -1, 0
+        ));
+
+        if (storage == MAP_FAILED) {
+            storage = nullptr;
+        }
+
+        mlock(storage, CAPACITY * sizeof(T));
+    }
+
+    ~Pool() {
+        if (storage && storage != MAP_FAILED) {
+            munmap(storage, CAPACITY * sizeof(T));
+        }
+    }
+
+    uint32_t allocate() {
+        if (freelist_top == 0) {
+            return UINT32_MAX; // Pool exhausted
+        }
+        return freelist[--freelist_top];
+    }
+
+    void free(uint32_t idx) {
+        if (freelist_top < CAPACITY) {
+            freelist[freelist_top++] = idx;
+        }
+    }
+
+    T& operator[](uint32_t idx) {
+        return storage[idx];
+    }
+
+}; // end of pool
 
 class FeedHandler {
 private:
-
-    // ts_recv,ts_event,rtype,publisher_id,instrument_id,action,side,
-    // depth,price,size,flags,ts_in_delta,sequence,symb ol
-
-    // a symbol's container
-    using pricePoint = std::unique_ptr<priceLevel>;
-    // using symbolPrices = std::vector<pricePoint> ;  // pre-allocated vector of price levels
-    using symbolPrices = RBTree<int64_t, priceLevel>;
-
-    // buy and sell side
-    using listing = std::pair<std::basic_string<char>, symbolPrices>;
-    using buyMarket = std::vector<listing>;  // symbol -> sorted prices (ascending for buys)
-    using sellMarket = std::vector<listing>;  // symbol -> sorted prices (descending for sells)
-
-    buyMarket buys; // best bid -> highest priced order
-    sellMarket sells; // best ask -> lowest priced order
+    std::vector<SymbolBook> books;
     std::unordered_set<uint64_t> canceled;
+    std::unordered_map<uint32_t, std::string> id_to_symbol_;  // instrument_id -> symbol
+    Pool<Order, MAX_SIZE> order_pool;
 
     MatchingMetrics metrics_;
 
-    // Helper methods for vector-based market access
-    symbolPrices* findSymbolInBuys(const std::basic_string<char> &symbol);
-    symbolPrices* findSymbolInSells(const std::basic_string<char> &symbol);
-
-    symbolPrices* getSymbolPriceLevel(const std::basic_string<char> &symbol, databento::Side side) {
-        if (side == databento::Side::Ask) {
-            auto sellsForSymbol = findSymbolInSells(symbol);
-            return sellsForSymbol;
+    SymbolBook* findBook(const std::basic_string<char>& symbol) {
+        SymbolBook target;
+        target.symbol = symbol;
+        auto it = std::lower_bound(books.begin(), books.end(), target);
+        if (it != books.end() && it->symbol == symbol) {
+            return &(*it);
         }
-
-        auto buysForSymbol = findSymbolInBuys(symbol);
-        return buysForSymbol;
+        return nullptr;
     }
 
-
-    // order by id
-    order HEAD;
-
-
-    // std::map<int64_t, std::queue<order>> BUY_OVERFLOW; // best bid -> highest priced order
-    // std::map<int64_t, level, std::queue<order>> SELL_OVERFLOW; // best ask -> lowest priced order
-
 public:
-    FeedHandler() {
-        metrics_.cpu.takeSnapshot();  // Initialize CPU baseline
-    };
+    FeedHandler() = default;
     FeedHandler(const FeedHandler &fh){};
     ~FeedHandler(){};
 
-    void increment() {
-        ++counter;
-    }
-/*-----------------------Metrics------------------------------ BEGIN*/
     MatchingMetrics& getMetrics() { return metrics_; }
-    const MatchingMetrics& getMetrics() const { return metrics_; }
-    void updateMemoryMetrics();
-    size_t calculateMemoryFootprint() const;
-    void printMetrics(std::ostream &os = std::cout) {
-        updateMemoryMetrics();
-        metrics_.print(os);
-    }
-    void resetMetrics() { metrics_.reset(); }
+    size_t calculateMemoryUsed() const;
 
-    void printCurrentOrderBook(std::ostream &os) const;
-    void reader(std::string filename);
-    /*-----------------------Metrics------------------------------ END*/
+    void printMetrics(std::ostream &os, uint64_t recordCount) {
+        metrics_.memoryUsedBytes = calculateMemoryUsed();
+        metrics_.printLine(os, recordCount);
+    }
+
+    void printMetricsCSV(std::ostream &os, uint64_t recordCount) {
+        metrics_.memoryUsedBytes = calculateMemoryUsed();
+        metrics_.printCSVLine(os, recordCount);
+    }
+
+    void resetMetrics() { metrics_.reset(); }
 
     void processOrder(
         uint64_t &id,
@@ -127,20 +141,82 @@ public:
         databento::TimeDeltaNanos &ts_event);
 
 
-    void match(order &entry, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
+    void match(Order& entry, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
 
-    // rebuild methods
-    void addOrder(order &entry, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
+    void  addOrder(Order& entry, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
     void cancelOrder(const uint64_t &id);
 
-    void prep(std::vector<std::basic_string<char>> &symbols) {
-        for (std::basic_string<char> symbol : symbols) {
-            auto treeOfPriceLevels = std::make_unique<symbolPrices>();
-            buys.push_back({symbol, symbolPrices()});
-            sells.push_back({symbol, symbolPrices()});
+    void registerSymbol(uint32_t id, const std::string& symbol) {
+        id_to_symbol_[id] = symbol;
+    }
+
+    const std::string& getSymbol(uint32_t id) const {
+        return id_to_symbol_.at(id);
+    }
+
+    void prep(const std::basic_string<char>& symbol,
+              int64_t low,
+              int64_t high,
+              int64_t tick_size) {
+        SymbolBook book;
+        book.bids.initialize(low, high, tick_size);
+        book.asks.initialize(low, high, tick_size);
+        book.symbol = symbol;
+        books.push_back(std::move(book));
+    }
+
+    void reserveBooks(size_t count) {
+        books.reserve(count);
+    }
+
+    void finalizePrep() {
+        std::sort(books.begin(), books.end());
+    }
+
+    /* POOL MANAGEMENT */
+    void latestOrderFilled(priceLevel& level) {
+        if (level.isEmpty()) return;
+
+        uint32_t headIdx = level.head;
+        Order& toRemove = order_pool[headIdx];
+        level.head = toRemove._next;
+
+        if (level.head == NULL_INDEX) {
+            level.tail = NULL_INDEX;
         }
+
+        order_pool.free(headIdx);
+        --level._size;
+    }
+
+    void processCancel(priceLevel& level) {
+        // same as latestOrderFilled, created for clarity
+        latestOrderFilled(level);
+    }
+
+    uint32_t push(priceLevel& level, Order& entry) {
+        uint32_t idx = order_pool.allocate();
+        if (idx == NULL_INDEX) {
+            return NULL_INDEX; // pool exhausted
+        }
+
+        order_pool[idx] = entry;
+        order_pool[idx].idx = idx;
+        order_pool[idx]._next = NULL_INDEX;
+
+        if (level.isEmpty()) {
+            level.head = idx;
+            level.tail = idx;
+        } else {
+            order_pool[level.tail]._next = idx;
+            level.tail = idx;
+        }
+
+        ++level._size;
+        return idx;
     }
 };
+
 
 
 #endif //FEEDHANDLER_H

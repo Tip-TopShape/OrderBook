@@ -2,14 +2,20 @@
 // Created by Eleazar Vega on 12/31/25.
 //
 
-// #define "memory_order.h"
-
 #ifndef PRICELEVEL_H
 #define PRICELEVEL_H
 
-inline static std::atomic_int counter = 0;
-
 #include <atomic>
+#include <cstdint>
+
+#include <databento/constants.hpp>
+#include <databento/dbn.hpp>
+#include <databento/symbology.hpp>
+#include <databento/historical.hpp>
+
+inline static std::atomic_int counter = 0;
+constexpr uint32_t NULL_INDEX = UINT32_MAX;
+constexpr static size_t MAX_SIZE = 2000000;
 
 struct Order {
     Order();
@@ -23,10 +29,10 @@ struct Order {
 
     int64_t id;
     uint32_t qty;
+    uint32_t idx;
     char side;
-    std::unique_ptr<Order> _next;
+    uint32_t _next;
 
-    // std::basic_string<char> symbol;
     databento::UnixNanos ts;
     databento::UnixNanos ts_event;
 
@@ -35,82 +41,32 @@ struct Order {
     }
 }__attribute__((aligned(64)));
 
-using order = std::unique_ptr<Order>;
-constexpr static int MAX_SIZE = 100;
 class priceLevel {
 private:
-    std::vector<order> levels = std::vector<order>(MAX_SIZE);
-    std::atomic<int> start = 0; // start of the buffer
-    std::atomic<int> next = 0;
-    size_t _size = 0;
+
 
 public:
-    priceLevel() {}
-    bool isEmpty() {
-        if (_size == 0) {
-            return true;
-        }
+    size_t _size = 0;
+    int64_t price;
+    uint32_t head;
+    uint32_t tail;
+    priceLevel() : head(NULL_INDEX), tail(NULL_INDEX) {}
 
-
-        return false;
-    }
-
-    void incrementStart() {
-        // // Single producer, single consumer - NO CAS needed!
-        // write_index = atomic_load_relaxed(&producer_index);
-        // if (write_index - atomic_load_acquire(&consumer_index) < BUFFER_SIZE) {
-        //     buffer[write_index % BUFFER_SIZE] = data;
-        //     atomic_store_release(&producer_index, write_index + 1);
-        // }
-        // auto i = start.load(std::memory_order::relaxed);
-        // if (i - std::atomic_load)
-    }
-
-    void latestOrderFilled() {
-        levels[start].reset();
-        postReset();
-    }
-
-    void processCancel() {
-        // same as latestOrderFilled, created for clarity
-        latestOrderFilled();
+    bool isEmpty() const {
+        return _size == 0;
     }
 
     size_t size() {
         return _size;
     }
 
-    void push(order &entry) {
-        if (this->size() == MAX_SIZE) {
-            return;
-        }
-
-        levels[next] = std::move(entry);
-        ++next;
-        next = next % MAX_SIZE; // loop back using modulo
-        ++_size;
-    }
-
-    Order* top() {
-        return levels[start].get();
-    }
-
-    void postReset() {
-        --_size; // removed an order
-        ++start;
-        start = start % MAX_SIZE; // loop back using modulo
+    uint32_t top() const {
+        return head;
     }
 
     size_t memoryFootprint() const {
         size_t total = sizeof(*this);
-        total += levels.capacity() * sizeof(order);  // vector storage
-
-        // Add memory for each actual Order object
-        for (const auto& ord : levels) {
-            if (ord) {
-                total += ord->memoryFootprint();
-            }
-        }
+        total += MAX_SIZE * sizeof(Order);
         return total;
     }
 };

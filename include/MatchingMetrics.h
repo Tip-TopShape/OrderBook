@@ -1,244 +1,142 @@
-//
-// Created by Eleazar Vega on 01/10/26.
-//
-
 #ifndef MATCHINGMETRICS_H
 #define MATCHINGMETRICS_H
 
 #include <atomic>
 #include <cstdint>
 #include <iostream>
-#include <sstream>
 #include <iomanip>
 #include <chrono>
-
-#include "CpuMetrics.h"
+#include <algorithm>
+#include <vector>
 
 struct MatchingMetrics {
+    using Clock = std::chrono::high_resolution_clock;
+    using TimePoint = Clock::time_point;
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Order Flow Counters
-    // ─────────────────────────────────────────────────────────────────────────
-    struct OrderFlow {
-        std::atomic<uint64_t> totalMatchCalls{0};
-        std::atomic<uint64_t> bidOrders{0};
-        std::atomic<uint64_t> askOrders{0};
-    } orderFlow;
+    // Reservoir sampling for latency percentiles
+    struct LatencyHistogram {
+        static constexpr size_t RESERVOIR_SIZE = 10000;
+        std::vector<uint64_t> samples;
+        size_t count = 0;
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Fill Statistics
-    // ─────────────────────────────────────────────────────────────────────────
-    struct FillStats {
-        std::atomic<uint64_t> fullFills{0};
-        std::atomic<uint64_t> partialFills{0};
-        std::atomic<uint64_t> noFills{0};
-        std::atomic<uint64_t> ordersMatched{0};
-        std::atomic<uint64_t> qtyMatched{0};
-    } fills;
+        LatencyHistogram() { samples.reserve(RESERVOIR_SIZE); }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Match Latency (nanoseconds)
-    // ─────────────────────────────────────────────────────────────────────────
-    struct MatchLatency {
-        std::atomic<uint64_t> totalTimeNs{0};
-        std::atomic<uint64_t> bidTimeNs{0};
-        std::atomic<uint64_t> askTimeNs{0};
-        std::atomic<uint64_t> minNs{UINT64_MAX};
-        std::atomic<uint64_t> maxNs{0};
-    } latency;
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Symbol Lookup Performance
-    // ─────────────────────────────────────────────────────────────────────────
-    struct SymbolLookup {
-        std::atomic<uint64_t> calls{0};
-        std::atomic<uint64_t> totalTimeNs{0};
-    } symbolLookup;
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Book State (live counters - updated incrementally)
-    // ─────────────────────────────────────────────────────────────────────────
-    struct BookState {
-        std::atomic<uint64_t> buyOrders{0};
-        std::atomic<uint64_t> sellOrders{0};
-        std::atomic<uint64_t> buyPriceLevels{0};
-        std::atomic<uint64_t> sellPriceLevels{0};
-    } book;
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Memory Usage (snapshot - updated on demand)
-    // ─────────────────────────────────────────────────────────────────────────
-    struct MemoryUsage {
-        uint64_t buySymbols{0};
-        uint64_t sellSymbols{0};
-        uint64_t buyPriceLevels{0};
-        uint64_t sellPriceLevels{0};
-        uint64_t buyOrders{0};
-        uint64_t sellOrders{0};
-        uint64_t estimatedBytes{0};
+        void record(uint64_t ns) {
+            if (samples.size() < RESERVOIR_SIZE) {
+                samples.push_back(ns);
+            } else {
+                samples[count % RESERVOIR_SIZE] = ns;
+            }
+            ++count;
+        }
 
         void reset() {
-            buySymbols = 0;
-            sellSymbols = 0;
-            buyPriceLevels = 0;
-            sellPriceLevels = 0;
-            buyOrders = 0;
-            sellOrders = 0;
-            estimatedBytes = 0;
+            samples.clear();
+            count = 0;
         }
-    } memory;
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // CPU Usage (cross-platform)
-    // ─────────────────────────────────────────────────────────────────────────
-    CpuMetrics cpu;
+        uint64_t percentile(double p) const {
+            if (samples.empty()) return 0;
+            std::vector<uint64_t> sorted = samples;
+            std::sort(sorted.begin(), sorted.end());
+            return sorted[static_cast<size_t>(p * (sorted.size() - 1))];
+        }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Methods
-    // ─────────────────────────────────────────────────────────────────────────
+        uint64_t p50() const { return percentile(0.50); }
+        uint64_t p99() const { return percentile(0.99); }
+        uint64_t p999() const { return percentile(0.999); }
+    };
+
+    std::atomic<uint64_t> ordersProcessed{0};
+    std::atomic<uint64_t> fills{0};
+    LatencyHistogram latencyHist;
+
+    TimePoint windowStart;
+    uint64_t ordersInWindow{0};
+    double throughputPerSec{0.0};
+
+    uint64_t memoryUsedBytes{0};
+
+    void startWindow() {
+        windowStart = Clock::now();
+        ordersInWindow = 0;
+    }
+
+    void recordOrder() { ++ordersInWindow; }
+    void recordLatency(uint64_t ns) { latencyHist.record(ns); }
+
+    void endWindow() {
+        auto durationNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            Clock::now() - windowStart).count();
+        if (durationNs > 0) {
+            throughputPerSec = ordersInWindow * 1e9 / durationNs;
+        }
+    }
 
     void reset() {
-        orderFlow.totalMatchCalls = 0;
-        orderFlow.bidOrders = 0;
-        orderFlow.askOrders = 0;
-
-        fills.fullFills = 0;
-        fills.partialFills = 0;
-        fills.noFills = 0;
-        fills.ordersMatched = 0;
-        fills.qtyMatched = 0;
-
-        latency.totalTimeNs = 0;
-        latency.bidTimeNs = 0;
-        latency.askTimeNs = 0;
-        latency.minNs = UINT64_MAX;
-        latency.maxNs = 0;
-
-        symbolLookup.calls = 0;
-        symbolLookup.totalTimeNs = 0;
-
-        memory.reset();
-        cpu.reset();
-        cpu.takeSnapshot();  // Start fresh interval
+        ordersProcessed = 0;
+        fills = 0;
+        latencyHist.reset();
+        startWindow();
     }
 
-    double old = 0.0;
-    void print(std::ostream &os) {
-        // Update CPU metrics before printing
-        cpu.calculateCpuPercentage();
+    void printLine(std::ostream &os, uint64_t recordCount) {
+        endWindow();
 
-        auto pct = [&](uint64_t val) {
-            return orderFlow.totalMatchCalls > 0
-                ? (100.0 * val / orderFlow.totalMatchCalls) : 0.0;
+        auto fmtCount = [](uint64_t n) -> std::string {
+            if (n >= 1000000) return std::to_string(n / 1000) + "K";
+            if (n >= 1000) return std::to_string(n / 1000) + "K";
+            return std::to_string(n);
         };
 
-        if (pct(fills.fullFills) > 2*old){
-            os << "\n*** ALERT: Full fills percentage increased from "
-               << std::fixed << std::setprecision(2) << old << "% to "
-               << pct(fills.fullFills) << "% ***\n";
-        } else {
-            old = pct(fills.fullFills);
-        }
+        auto fmtThroughput = [](double t) -> std::string {
+            std::ostringstream ss;
+            if (t >= 1e6) ss << std::fixed << std::setprecision(2) << (t / 1e6) << "M/s";
+            else if (t >= 1e3) ss << std::fixed << std::setprecision(0) << (t / 1e3) << "K/s";
+            else ss << std::fixed << std::setprecision(0) << t << "/s";
+            return ss.str();
+        };
 
-        os << "\n============ Matching Engine Metrics ============\n";
-        os << "Platform: " << CpuMetrics::getPlatformInfo() << "\n\n";
+        auto fmtLatency = [](uint64_t ns) -> std::string {
+            std::ostringstream ss;
+            if (ns >= 1000000) ss << std::fixed << std::setprecision(1) << (ns / 1e6) << "ms";
+            else if (ns >= 1000) ss << std::fixed << std::setprecision(1) << (ns / 1e3) << "us";
+            else ss << ns << "ns";
+            return ss.str();
+        };
 
-        os << "ORDER FLOW\n";
-        os << "  Total match() calls:   " << orderFlow.totalMatchCalls << "\n";
-        os << "  Bid orders:            " << orderFlow.bidOrders << "\n";
-        os << "  Ask orders:            " << orderFlow.askOrders << "\n\n";
+        auto fmtMem = [](uint64_t b) -> std::string {
+            std::ostringstream ss;
+            if (b >= 1024*1024*1024) ss << std::fixed << std::setprecision(1) << (b / (1024.0*1024*1024)) << "GB";
+            else if (b >= 1024*1024) ss << std::fixed << std::setprecision(0) << (b / (1024.0*1024)) << "MB";
+            else if (b >= 1024) ss << std::fixed << std::setprecision(0) << (b / 1024.0) << "KB";
+            else ss << b << "B";
+            return ss.str();
+        };
 
-        os << "FILL STATISTICS\n";
-        os << "  Full fills:            " << fills.fullFills
-           << " (" << pct(fills.fullFills) << "%)\n";
-        os << "  Partial fills:         " << fills.partialFills
-           << " (" << pct(fills.partialFills) << "%)\n";
-        os << "  No fills (added):      " << fills.noFills
-           << " (" << pct(fills.noFills) << "%)\n";
-        os << "  Orders matched:        " << fills.ordersMatched << "\n";
-        os << "  Quantity matched:      " << fills.qtyMatched << "\n\n";
-
-        os << "MATCH LATENCY (nanoseconds)\n";
-        os << "  Total time:            " << latency.totalTimeNs << "\n";
-        os << "  Avg per match:         "
-           << (orderFlow.totalMatchCalls > 0 ? latency.totalTimeNs / orderFlow.totalMatchCalls : 0) << "\n";
-        os << "  Min:                   "
-           << (latency.minNs == UINT64_MAX ? 0 : latency.minNs.load()) << "\n";
-        os << "  Max:                   " << latency.maxNs << "\n";
-        os << "  Avg bid match:         "
-           << (orderFlow.bidOrders > 0 ? latency.bidTimeNs / orderFlow.bidOrders : 0) << "\n";
-        os << "  Avg ask match:         "
-           << (orderFlow.askOrders > 0 ? latency.askTimeNs / orderFlow.askOrders : 0) << "\n\n";
-
-        os << "SYMBOL LOOKUP\n";
-        os << "  Lookup calls:          " << symbolLookup.calls << "\n";
-        os << "  Total time:            " << symbolLookup.totalTimeNs << " ns\n";
-        os << "  Avg per lookup:        "
-           << (symbolLookup.calls > 0 ? symbolLookup.totalTimeNs / symbolLookup.calls : 0) << " ns\n\n";
-
-        os << "MEMORY USAGE\n";
-        os << "  Buy symbols:           " << memory.buySymbols << "\n";
-        os << "  Sell symbols:          " << memory.sellSymbols << "\n";
-        os << "  Buy price levels:      " << memory.buyPriceLevels << "\n";
-        os << "  Sell price levels:     " << memory.sellPriceLevels << "\n";
-        os << "  Buy orders:            " << memory.buyOrders << "\n";
-        os << "  Sell orders:           " << memory.sellOrders << "\n";
-        os << "  Total orders:          " << (memory.buyOrders + memory.sellOrders) << "\n";
-        os << "  Estimated memory:      " << formatBytes(memory.estimatedBytes) << "\n\n";
-
-        cpu.print(os);
-
-        os << "\n=================================================\n";
+        os << "[" << std::setw(6) << fmtCount(recordCount) << "] "
+           << std::setw(8) << fmtThroughput(throughputPerSec) << " | "
+           << "p50=" << std::setw(6) << fmtLatency(latencyHist.p50()) << " "
+           << "p99=" << std::setw(6) << fmtLatency(latencyHist.p99()) << " "
+           << "p99.9=" << std::setw(6) << fmtLatency(latencyHist.p999()) << " | "
+           << std::setw(6) << fmtMem(memoryUsedBytes) << "\n";
     }
 
-    static std::string formatBytes(uint64_t bytes) {
-        const char* units[] = {"B", "KB", "MB", "GB"};
-        int unitIdx = 0;
-        double size = static_cast<double>(bytes);
-        while (size >= 1024.0 && unitIdx < 3) {
-            size /= 1024.0;
-            ++unitIdx;
-        }
-        std::ostringstream oss;
-        oss << std::fixed << std::setprecision(2) << size << " " << units[unitIdx];
-        return oss.str();
+    // CSV header for benchmark output
+    static void printCSVHeader(std::ostream &os) {
+        os << "records,throughput,p50_ns,p99_ns,p999_ns,memory_bytes\n";
     }
 
-    // Helper to update min atomically
-    void updateMin(uint64_t val) {
-        uint64_t current = latency.minNs.load();
-        while (val < current && !latency.minNs.compare_exchange_weak(current, val));
-    }
-
-    // Helper to update max atomically
-    void updateMax(uint64_t val) {
-        uint64_t current = latency.maxNs.load();
-        while (val > current && !latency.maxNs.compare_exchange_weak(current, val));
+    // CSV line for benchmark output
+    void printCSVLine(std::ostream &os, uint64_t recordCount) {
+        endWindow();
+        os << recordCount << ","
+           << std::fixed << std::setprecision(0) << throughputPerSec << ","
+           << latencyHist.p50() << ","
+           << latencyHist.p99() << ","
+           << latencyHist.p999() << ","
+           << memoryUsedBytes << "\n";
     }
 };
 
-// RAII timer for scoped measurements
-class ScopedTimer {
-public:
-    using Clock = std::chrono::high_resolution_clock;
-
-    explicit ScopedTimer(std::atomic<uint64_t> &target)
-        : target_(target), start_(Clock::now()) {}
-
-    ~ScopedTimer() {
-        auto end = Clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start_).count();
-        target_.fetch_add(duration);
-    }
-
-    uint64_t elapsed() const {
-        auto now = Clock::now();
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(now - start_).count();
-    }
-
-private:
-    std::atomic<uint64_t> &target_;
-    Clock::time_point start_;
-};
-
-#endif //MATCHINGMETRICS_H
+#endif
