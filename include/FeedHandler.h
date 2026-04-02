@@ -33,12 +33,13 @@
 
 struct SymbolBook {
     std::basic_string<char> symbol;
-    TickArray<int64_t, priceLevel> bids;
-    TickArray<int64_t, priceLevel> asks;
+    TickArray<int64_t> bids;
+    TickArray<int64_t> asks;
 
     bool operator<(const SymbolBook& other) const {
         return symbol < other.symbol;
     }
+
 };
 
 template <typename T, size_t CAPACITY>
@@ -62,6 +63,7 @@ struct Pool {
 
         if (storage == MAP_FAILED) {
             storage = nullptr;
+            return;
         }
 
         mlock(storage, CAPACITY * sizeof(T));
@@ -97,7 +99,9 @@ private:
     std::vector<SymbolBook> books;
     std::unordered_set<uint64_t> canceled;
     std::unordered_map<uint32_t, std::string> id_to_symbol_;  // instrument_id -> symbol
+    std::unordered_map<uint64_t, uint32_t> id_to_index;  // order_id -> pool index
     Pool<Order, MAX_SIZE> order_pool;
+    Pool<priceLevel, MAX_LEVELS> price_pool;
 
     MatchingMetrics metrics_;
 
@@ -113,8 +117,9 @@ private:
 
 public:
     FeedHandler() = default;
-    FeedHandler(const FeedHandler &fh){};
-    ~FeedHandler(){};
+    FeedHandler(const FeedHandler&) = delete;
+    FeedHandler& operator=(const FeedHandler&) = delete;
+    ~FeedHandler() = default;
 
     MatchingMetrics& getMetrics() { return metrics_; }
     size_t calculateMemoryUsed() const;
@@ -142,8 +147,10 @@ public:
 
 
     void match(Order& entry, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
+    bool modifyOrder(uint64_t order_id, int64_t new_price, uint32_t new_qty, std::basic_string<char> &symbol);
 
-    void  addOrder(Order& entry, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
+    void trade(uint64_t id, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
+    void addOrder(Order& entry, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
     void cancelOrder(const uint64_t &id);
 
     void registerSymbol(uint32_t id, const std::string& symbol) {
@@ -151,6 +158,8 @@ public:
     }
 
     const std::string& getSymbol(uint32_t id) const {
+        static const std::string empty;
+        if (!id_to_symbol_.contains(id)) return empty;
         return id_to_symbol_.at(id);
     }
 
@@ -162,7 +171,7 @@ public:
         book.bids.initialize(low, high, tick_size);
         book.asks.initialize(low, high, tick_size);
         book.symbol = symbol;
-        books.push_back(std::move(book));
+        books.emplace_back(std::move(book));
     }
 
     void reserveBooks(size_t count) {
@@ -194,6 +203,26 @@ public:
         latestOrderFilled(level);
     }
 
+    void popOrder(priceLevel& level, uint32_t idx) {
+        if (idx == level.head) {
+            latestOrderFilled(level);
+            return;
+        }
+
+        Order& order = order_pool[idx];
+
+        if (order._prev != NULL_INDEX)
+            order_pool[order._prev]._next = order._next;
+
+        if (order._next != NULL_INDEX)
+            order_pool[order._next]._prev = order._prev;
+        else
+            level.tail = order._prev;
+
+        order_pool.free(idx);
+        --level._size;
+    }
+
     uint32_t push(priceLevel& level, Order& entry) {
         uint32_t idx = order_pool.allocate();
         if (idx == NULL_INDEX) {
@@ -203,6 +232,8 @@ public:
         order_pool[idx] = entry;
         order_pool[idx].idx = idx;
         order_pool[idx]._next = NULL_INDEX;
+        id_to_index[entry.id] = idx;
+        order_pool[idx]._prev = level.isEmpty() ? NULL_INDEX : level.tail;
 
         if (level.isEmpty()) {
             level.head = idx;

@@ -8,48 +8,23 @@
 #include <cstdint>
 #include <sys/mman.h>
 #include <iostream>
-#include <new>  // for placement new
 
-// macOS compatibility
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS MAP_ANON
 #endif
 
-template <typename T, size_t CAPACITY>
-struct Arena {
-    T* storage;
-    size_t top = 0;
 
-    Arena() {
-        storage = static_cast<T*>(mmap(
-            nullptr,
-            CAPACITY*sizeof(T),
-            PROT_READ | PROT_WRITE,
-            MAP_PRIVATE | MAP_ANONYMOUS,
-            -1, 0
-        ));
-        mlock(storage, CAPACITY * sizeof(T));
-    }
-
-    T* allocate(size_t n) {
-        if (top + n > CAPACITY) return nullptr; // exhausted
-        T* start = &storage[top];
-        top += n;
-        return start;
-    }
-};
-
-template <typename T, typename CT>
+template <typename T>
 class TickArray {
 public:
     TickArray() = default;
 
     struct Slot {
-        T price;
-        CT level; // slot owns
-        bool active = false;
+        T        price;
+        uint32_t level_idx;
+        bool     active;
 
-        Slot() : price(0), level(), active(false) {}
+        Slot() : price(0), level_idx(0), active(false) {}
     };
 
     Slot* ticks = nullptr;
@@ -64,7 +39,7 @@ public:
     size_t capacity;
     // Prices are now normalized to cents ($1.00 = 100)
 
-    static constexpr size_t MAX_SLOTS = 5000; // reduced for M1 16GB
+    static constexpr size_t MAX_SLOTS = 5000;
 
     void initialize(int64_t low, int64_t high, int64_t tick) {
         tick_size = tick;
@@ -76,25 +51,6 @@ public:
             return;
         }
 
-        ticks = static_cast<Slot*>(mmap(
-            nullptr,
-            capacity * sizeof(Slot),
-            PROT_READ | PROT_WRITE,
-            MAP_PRIVATE | MAP_ANONYMOUS,
-            -1, 0
-        ));
-
-        if (ticks == MAP_FAILED) {
-            std::cerr << "TickArray: mmap failed for " << capacity << " slots\n";
-            ticks = nullptr;
-            return;
-        }
-
-        for (size_t i = 0; i < capacity; ++i) {
-            new (&ticks[i]) Slot();
-        }
-
-        // mlock can fail due to resource limits - ignore
         mlock(ticks, capacity * sizeof(Slot));
     }
 
@@ -105,8 +61,8 @@ public:
         : ticks(other.ticks), _size(other._size),
           minPrice(other.minPrice), maxPrice(other.maxPrice),
           base_price(other.base_price), tick_size(other.tick_size),
-          capacity(other.capacity), out_of_bounds_level(std::move(other.out_of_bounds_level)) {
-        other.ticks = nullptr;  // prevent double-free
+          capacity(other.capacity) {
+        other.ticks = nullptr;
         other.capacity = 0;
     }
 
@@ -120,7 +76,6 @@ public:
             base_price = other.base_price;
             tick_size = other.tick_size;
             capacity = other.capacity;
-            out_of_bounds_level = std::move(other.out_of_bounds_level);
             other.ticks = nullptr;
             other.capacity = 0;
         }
@@ -151,7 +106,7 @@ public:
                 minPrice = INT64_MAX;
                 return;
             }
-            if (!ticks[idx].level.isEmpty()) return;
+            if (ticks[idx].active) return;
         } while (true);
     }
 
@@ -164,11 +119,9 @@ public:
                 maxPrice = INT64_MIN;
                 return;
             }
-            if (!ticks[idx].level.isEmpty()) return;
+            if (ticks[idx].active) return;
         } while (true);
     }
-
-    CT out_of_bounds_level;
 
     size_t toIndex(int64_t price) {
         if (price < base_price) return SIZE_MAX;
@@ -177,32 +130,45 @@ public:
         return idx;
     }
 
-    CT& find(const T& price) {
+    uint32_t find(const T& price) {
         if (!ticks) {
-            return out_of_bounds_level;
+            return UINT32_MAX;
         }
 
         size_t idx = toIndex(price);
         if (idx == SIZE_MAX) {
-            return out_of_bounds_level;
+            return UINT32_MAX;
         }
 
         if (price < minPrice) minPrice = price;
         if (price > maxPrice) maxPrice = price;
 
-        return ticks[idx].level;
+        return ticks[idx].active ? ticks[idx].level_idx : UINT32_MAX;
     }
 
-    CT& bestAsk() {
+    void activate(const T& price, uint32_t pool_idx) {
+        size_t idx = toIndex(price);
+        if (idx == SIZE_MAX) return;
+        ticks[idx].level_idx = pool_idx;
+        ticks[idx].active = true;
+    }
+
+    void deactivate(const T& price) {
+        size_t idx = toIndex(price);
+        if (idx == SIZE_MAX) return;
+        ticks[idx].active = false;
+    }
+
+    uint32_t bestAsk() {
         size_t idx = toIndex(minPrice);
-        if (idx == SIZE_MAX) return out_of_bounds_level;
-        return ticks[idx].level;
+        if (idx == SIZE_MAX) return UINT32_MAX;
+        return ticks[idx].level_idx;
     }
 
-    CT& bestBid() {
+    uint32_t bestBid() {
         size_t idx = toIndex(maxPrice);
-        if (idx == SIZE_MAX) return out_of_bounds_level;
-        return ticks[idx].level;
+        if (idx == SIZE_MAX) return UINT32_MAX;
+        return ticks[idx].level_idx;
     }
 
     int64_t getMin() {

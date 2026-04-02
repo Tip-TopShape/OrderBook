@@ -13,15 +13,14 @@
 #include <databento/symbology.hpp>
 #include <databento/historical.hpp>
 
-inline static std::atomic_int counter = 0;
+inline static std::atomic<int64_t> counter = 0;
 constexpr uint32_t NULL_INDEX = UINT32_MAX;
 constexpr static size_t MAX_SIZE = 2000000;
+static constexpr uint32_t MAX_LEVELS = 1 << 20;
 
 struct Order {
-    Order();
-
-    Order(databento::UnixNanos &ts1, databento::TimeDeltaNanos &ts2, databento::Side &_side, int _qty)
-        :  side(_side), qty(_qty), ts(ts1), ts_event(ts2) {
+    Order(databento::UnixNanos &ts1, databento::TimeDeltaNanos &ts2, databento::Side &_side, int _qty, int64_t _price)
+        :  side(_side), qty(_qty), price(_price), ts(ts1), ts_event(ts2) {
 
         id = counter;
         ++counter;
@@ -30,8 +29,10 @@ struct Order {
     int64_t id;
     uint32_t qty;
     uint32_t idx;
+    int64_t price;
     char side;
     uint32_t _next;
+    uint32_t _prev;
 
     databento::UnixNanos ts;
     databento::UnixNanos ts_event;

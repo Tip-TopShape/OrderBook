@@ -111,7 +111,7 @@ int main(int argc, char *argv[]) {
     std::cout << "----------|----------|--------------------------|--------\n";
 
     auto record = reader0.NextRecord();
-    int counter = 0;
+    int64_t counter = 0;
     feed->getMetrics().startWindow();
 
     while (record != nullptr && counter < max_records) {
