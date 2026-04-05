@@ -11,7 +11,6 @@
 #include <sstream>
 #include <map>
 #include <unordered_map>
-#include <unordered_set>
 #include <chrono>
 #include <atomic>
 #include <iostream>
@@ -97,7 +96,6 @@ struct Pool {
 class FeedHandler {
 private:
     std::vector<SymbolBook> books;
-    std::unordered_set<uint64_t> canceled;
     std::unordered_map<uint32_t, std::string> id_to_symbol_;  // instrument_id -> symbol
     std::unordered_map<uint64_t, uint32_t> id_to_index;  // order_id -> pool index
     Pool<Order, MAX_SIZE> order_pool;
@@ -151,7 +149,7 @@ public:
 
     void trade(uint64_t id, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
     void addOrder(Order& entry, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
-    void cancelOrder(const uint64_t &id);
+    void cancelOrder(const uint64_t &id, std::basic_string<char> &symbol);
 
     void registerSymbol(uint32_t id, const std::string& symbol) {
         id_to_symbol_[id] = symbol;
@@ -191,16 +189,17 @@ public:
         level.head = toRemove._next;
 
         if (level.head == NULL_INDEX) {
+            // if (level.tail == NULL_INDEX && level.head != NULL_INDEX) {// 6095691568
+            //     std::cout << "here";
+            // }
             level.tail = NULL_INDEX;
+        } else {
+            order_pool[level.head]._prev = NULL_INDEX;
         }
 
+        id_to_index.erase(toRemove.id);
         order_pool.free(headIdx);
         --level._size;
-    }
-
-    void processCancel(priceLevel& level) {
-        // same as latestOrderFilled, created for clarity
-        latestOrderFilled(level);
     }
 
     void popOrder(priceLevel& level, uint32_t idx) {
@@ -219,6 +218,7 @@ public:
         else
             level.tail = order._prev;
 
+        id_to_index.erase(order.id);
         order_pool.free(idx);
         --level._size;
     }
@@ -237,8 +237,14 @@ public:
 
         if (level.isEmpty()) {
             level.head = idx;
+            //     if (level.tail == NULL_INDEX && level.head != NULL_INDEX) {// 6095691568
+            //     std::cout << "here";
+            // }
             level.tail = idx;
         } else {
+            // if (level.tail == NULL_INDEX && level.head != NULL_INDEX) {// 6095691568
+            //     std::cout << "here";
+            // }
             order_pool[level.tail]._next = idx;
             level.tail = idx;
         }

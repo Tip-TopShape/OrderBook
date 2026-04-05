@@ -1,16 +1,19 @@
 #ifndef MATCHINGMETRICS_H
 #define MATCHINGMETRICS_H
 
-#include <atomic>
 #include <cstdint>
 #include <iostream>
 #include <iomanip>
-#include <chrono>
 #include <cstring>
+#include <time.h>
+
+static inline uint64_t now_ns() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+}
 
 struct MatchingMetrics {
-    using Clock = std::chrono::high_resolution_clock;
-    using TimePoint = Clock::time_point;
 
     struct LatencyHistogram {
         static constexpr size_t BUCKETS = 64;
@@ -46,22 +49,22 @@ struct MatchingMetrics {
         }
     };
 
-    std::atomic<uint64_t> ordersProcessed{0};
-    std::atomic<uint64_t> adds{0};
-    std::atomic<uint64_t> modifies{0};
-    std::atomic<uint64_t> cancels{0};
-    std::atomic<uint64_t> trades{0};
-    std::atomic<uint64_t> fills{0};
+    uint64_t ordersProcessed{0};
+    uint64_t adds{0};
+    uint64_t modifies{0};
+    uint64_t cancels{0};
+    uint64_t trades{0};
+    uint64_t fills{0};
     LatencyHistogram latencyHist;
 
-    TimePoint windowStart;
+    uint64_t windowStart{0};
     uint64_t ordersInWindow{0};
     double throughputPerSec{0.0};
 
     uint64_t memoryUsedBytes{0};
 
     void startWindow() {
-        windowStart = Clock::now();
+        windowStart = now_ns();
         ordersInWindow = 0;
     }
 
@@ -69,8 +72,7 @@ struct MatchingMetrics {
     void recordLatency(uint64_t ns) { latencyHist.record(ns); }
 
     void endWindow() {
-        auto durationNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            Clock::now() - windowStart).count();
+        uint64_t durationNs = now_ns() - windowStart;
         if (durationNs > 0) {
             throughputPerSec = ordersInWindow * 1e9 / durationNs;
         }

@@ -51,6 +51,21 @@ public:
             return;
         }
 
+        ticks = static_cast<Slot*>(mmap(
+            nullptr,
+            capacity * sizeof(Slot),
+            PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANONYMOUS,
+            -1, 0
+        ));
+
+        if (ticks == MAP_FAILED) {
+            ticks = nullptr;
+            return;
+        }
+
+        memset(ticks, 0xFF, capacity * sizeof(Slot));
+
         mlock(ticks, capacity * sizeof(Slot));
     }
 

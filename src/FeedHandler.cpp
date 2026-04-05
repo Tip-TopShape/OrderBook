@@ -26,7 +26,7 @@ void FeedHandler::processOrder(uint64_t &id,
     auto newOrder = Order(ts_recv, ts_event, side, qty, price);
     newOrder.id = id;
     bool priceChange = false;
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = now_ns();
     switch (action) {
         case databento::Action::Add:
             this->addOrder(newOrder, side, price, symbol);
@@ -39,7 +39,7 @@ void FeedHandler::processOrder(uint64_t &id,
             ++metrics_.modifies;
             break;
         case databento::Action::Cancel:
-            this->cancelOrder(id);
+            this->cancelOrder(id, symbol);
             ++metrics_.cancels;
             break;
         case databento::Action::Trade:
@@ -53,13 +53,13 @@ void FeedHandler::processOrder(uint64_t &id,
         default:
             break;
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
-    metrics_.recordLatency(std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+    auto t1 = now_ns();
+    metrics_.recordLatency(t1 - t0);
     metrics_.recordOrder();
 }
 
 void FeedHandler::match(Order& entry, databento::Side &side, int64_t &price, std::basic_string<char> &symbol) {
-    auto matchStart = std::chrono::high_resolution_clock::now();
+    auto matchStart = now_ns();
     bool fulfilled = false;
 
     SymbolBook* book = findBook(symbol);
@@ -77,17 +77,6 @@ void FeedHandler::match(Order& entry, databento::Side &side, int64_t &price, std
             if (level_price <= price && !level.isEmpty()) {
                 uint32_t matchIdx = level.top();
                 Order& match = order_pool[matchIdx];
-
-                if (canceled.find(match.id) != canceled.end()) {
-                    this->processCancel(level);
-                    if (level.isEmpty()) {
-                        book->asks.deactivate(level_price);
-                        price_pool.free(lvl_idx);
-                        book->asks.decrementSize();
-                        book->asks.advanceMin();
-                    }
-                    continue;
-                }
 
                 if (entry.qty >= match.qty) {
                     entry.qty -= match.qty;
@@ -127,17 +116,6 @@ void FeedHandler::match(Order& entry, databento::Side &side, int64_t &price, std
                 uint32_t matchIdx = level.top();
                 Order& match = order_pool[matchIdx];
 
-                if (canceled.find(match.id) != canceled.end()) {
-                    this->processCancel(level);
-                    if (level.isEmpty()) {
-                        book->bids.deactivate(level_price);
-                        price_pool.free(lvl_idx);
-                        book->bids.decrementSize();
-                        book->bids.advanceMax();
-                    }
-                    continue;
-                }
-
                 if (entry.qty >= match.qty) {
                     entry.qty -= match.qty;
                     match.qty = 0;
@@ -164,8 +142,7 @@ void FeedHandler::match(Order& entry, databento::Side &side, int64_t &price, std
         }
     }
 
-    auto matchEnd = std::chrono::high_resolution_clock::now();
-    uint64_t matchNs = std::chrono::duration_cast<std::chrono::nanoseconds>(matchEnd - matchStart).count();
+    uint64_t matchNs = now_ns() - matchStart;
 
     ++metrics_.ordersProcessed;
     metrics_.recordLatency(matchNs);
@@ -210,16 +187,16 @@ void FeedHandler::trade(uint64_t id, databento::Side &side, int64_t &price, std:
     auto &order = order_pool[idx];
     SymbolBook* book = findBook(symbol);
     if (!book) return;
-    auto &arr = (side == databento::Side::Bid) ? book->bids : book->asks;
+    auto &arr = (order.side == databento::Side::Bid) ? book->bids : book->asks;
 
-    uint32_t lvl_idx = arr.find(price);
+    uint32_t lvl_idx = arr.find(order.price);
     if (lvl_idx == UINT32_MAX) return;
     priceLevel &level = price_pool[lvl_idx];
     order.qty = std::min(0u, (order.qty - order.qty));
     if (order.qty == 0) {
         popOrder(level, idx);
         if (level.isEmpty()) {
-            arr.deactivate(price);
+            arr.deactivate(order.price);
             price_pool.free(lvl_idx);
             arr.decrementSize();
         }
@@ -243,8 +220,27 @@ void FeedHandler::addOrder(Order& entry, databento::Side &side, int64_t &price, 
     this->push(price_pool[lvl_idx], entry);
 }
 
-void FeedHandler::cancelOrder(const uint64_t &id) {
-    canceled.insert(id);
+void FeedHandler::cancelOrder(const uint64_t &id, std::basic_string<char> &symbol) {
+    if (!id_to_index.contains(id)) return;
+    uint32_t idx = id_to_index[id];
+    auto &order = order_pool[idx];
+
+    SymbolBook* book = findBook(symbol);
+    if (!book) return;
+    auto &arr = (order.side == databento::Side::Bid) ? book->bids : book->asks;
+
+    uint32_t lvl_idx = arr.find(order.price);
+    if (lvl_idx == UINT32_MAX) return;
+    priceLevel &level = price_pool[lvl_idx];
+
+    popOrder(level, idx);
+    id_to_index.erase(id);
+
+    if (level.isEmpty()) {
+        arr.deactivate(order.price);
+        price_pool.free(lvl_idx);
+        arr.decrementSize();
+    }
 }
 
 size_t FeedHandler::calculateMemoryUsed() const {
