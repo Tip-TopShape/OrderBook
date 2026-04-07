@@ -92,7 +92,7 @@ int main(int argc, char *argv[]) {
         int64_t ref_price = 10000;
         auto it = ref_prices.find(id);
         if (it != ref_prices.end()) ref_price = it->second;
-        int64_t low = std::max(0LL, ref_price - HALF_RANGE);
+        int64_t low = std::max(int64_t{0}, ref_price - HALF_RANGE);
         int64_t high = ref_price + HALF_RANGE;
         feed->prep(mapping.raw_symbol, low, high, TICK_SIZE);
     }
