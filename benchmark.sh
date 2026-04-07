@@ -8,7 +8,7 @@
 
 set -e
 
-cmake -B build -DCMAKE_BUILD_TYPE=Release > /dev/null
-cmake --build build --parallel > /dev/null
+cmake -B build -DCMAKE_BUILD_TYPE=Release 2>&1 | grep -v "^\-\-"
+cmake --build build --parallel
 
 ./build/OrderBook "$@"
