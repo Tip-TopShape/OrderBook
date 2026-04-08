@@ -95,11 +95,13 @@ struct Pool {
 
 class FeedHandler {
 private:
+    static constexpr uint32_t MAX_INSTRUMENT_ID = 100000;
     std::vector<SymbolBook> books;
-    std::unordered_map<uint32_t, std::string> id_to_symbol_;  // instrument_id -> symbol
-    std::unordered_map<uint64_t, uint32_t> id_to_index;  // order_id -> pool index
+    std::unordered_map<uint32_t, std::string> id_to_symbol_;
+    std::unordered_map<uint64_t, uint32_t> id_to_index;
     Pool<Order, MAX_SIZE> order_pool;
     Pool<priceLevel, MAX_LEVELS> price_pool;
+    SymbolBook* book_by_id[MAX_INSTRUMENT_ID] = {};
 
     MatchingMetrics metrics_;
 
@@ -111,6 +113,11 @@ private:
             return &(*it);
         }
         return nullptr;
+    }
+
+    SymbolBook* findBook(uint32_t instrument_id) {
+        if (instrument_id >= MAX_INSTRUMENT_ID) return nullptr;
+        return book_by_id[instrument_id];
     }
 
 public:
@@ -137,19 +144,19 @@ public:
     void processOrder(
         uint64_t &id,
         databento::Side &side,
-        std::basic_string<char> &symbol,
+        uint32_t instrument_id,
         databento::Action &action,
         int64_t &price, uint32_t &qty,
         databento::UnixNanos &ts_recv,
         databento::TimeDeltaNanos &ts_event);
 
 
-    void match(Order& entry, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
-    bool modifyOrder(uint64_t order_id, int64_t new_price, uint32_t new_qty, std::basic_string<char> &symbol);
+    void match(Order& entry, databento::Side &side, int64_t &price, uint32_t instrument_id);
+    bool modifyOrder(uint64_t order_id, int64_t new_price, uint32_t new_qty, uint32_t instrument_id);
 
-    void trade(uint64_t id, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
-    void addOrder(Order& entry, databento::Side &side, int64_t &price, std::basic_string<char> &symbol);
-    void cancelOrder(const uint64_t &id, std::basic_string<char> &symbol);
+    void trade(uint64_t id, databento::Side &side, int64_t &price, uint32_t instrument_id);
+    void addOrder(Order& entry, databento::Side &side, int64_t &price, uint32_t instrument_id);
+    void cancelOrder(const uint64_t &id, uint32_t instrument_id);
 
     void registerSymbol(uint32_t id, const std::string& symbol) {
         id_to_symbol_[id] = symbol;
@@ -178,6 +185,10 @@ public:
 
     void finalizePrep() {
         std::sort(books.begin(), books.end());
+        for (auto& [id, sym] : id_to_symbol_) {
+            if (id < MAX_INSTRUMENT_ID)
+                book_by_id[id] = findBook(sym);
+        }
     }
 
     /* POOL MANAGEMENT */

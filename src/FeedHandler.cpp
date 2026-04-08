@@ -7,7 +7,7 @@
 
 void FeedHandler::processOrder(uint64_t &id,
                                 databento::Side &side,
-                                std::basic_string<char> &symbol,
+                                uint32_t instrument_id,
                                 databento::Action &action,
                                 int64_t &price,
                                 uint32_t &qty,
@@ -29,25 +29,25 @@ void FeedHandler::processOrder(uint64_t &id,
     auto t0 = now_ns();
     switch (action) {
         case databento::Action::Add:
-            this->addOrder(newOrder, side, price, symbol);
+            this->addOrder(newOrder, side, price, instrument_id);
             ++metrics_.adds;
             break;
         case databento::Action::Modify:
-            priceChange = this->modifyOrder(id, price, qty, symbol);
+            priceChange = this->modifyOrder(id, price, qty, instrument_id);
             if (priceChange)
-                this->addOrder(newOrder, side, price, symbol);
+                this->addOrder(newOrder, side, price, instrument_id);
             ++metrics_.modifies;
             break;
         case databento::Action::Cancel:
-            this->cancelOrder(id, symbol);
+            this->cancelOrder(id, instrument_id);
             ++metrics_.cancels;
             break;
         case databento::Action::Trade:
-            this->trade(id, side, price, symbol);
+            this->trade(id, side, price, instrument_id);
             ++metrics_.trades;
             break;
         case databento::Action::Fill:
-            this->trade(id, side, price, symbol);
+            this->trade(id, side, price, instrument_id);
             ++metrics_.fills;
             break;
         default:
@@ -58,11 +58,11 @@ void FeedHandler::processOrder(uint64_t &id,
     metrics_.recordOrder();
 }
 
-void FeedHandler::match(Order& entry, databento::Side &side, int64_t &price, std::basic_string<char> &symbol) {
+void FeedHandler::match(Order& entry, databento::Side &side, int64_t &price, uint32_t instrument_id) {
     auto matchStart = now_ns();
     bool fulfilled = false;
 
-    SymbolBook* book = findBook(symbol);
+    SymbolBook* book = findBook(instrument_id);
     if (!book) return;
 
     // BUY ORDER
@@ -149,15 +149,15 @@ void FeedHandler::match(Order& entry, databento::Side &side, int64_t &price, std
     metrics_.recordOrder();
 
     if (!fulfilled) {
-        this->addOrder(entry, side, price, symbol);
+        this->addOrder(entry, side, price, instrument_id);
     }
 }
 
-bool FeedHandler::modifyOrder(uint64_t order_id, int64_t new_price, uint32_t new_qty, std::basic_string<char> &symbol) {
+bool FeedHandler::modifyOrder(uint64_t order_id, int64_t new_price, uint32_t new_qty, uint32_t instrument_id) {
     if (!id_to_index.contains(order_id)) return false;
     auto idx = id_to_index[order_id];
     auto &order = order_pool[idx];
-    SymbolBook* book = findBook(symbol);
+    SymbolBook* book = findBook(instrument_id);
     if (!book) return false;
     auto &arr = (order.side == databento::Side::Bid) ? book->bids : book->asks;
 
@@ -181,11 +181,11 @@ bool FeedHandler::modifyOrder(uint64_t order_id, int64_t new_price, uint32_t new
     }
 }
 
-void FeedHandler::trade(uint64_t id, databento::Side &side, int64_t &price, std::basic_string<char> &symbol) {
+void FeedHandler::trade(uint64_t id, databento::Side &side, int64_t &price, uint32_t instrument_id) {
     if (!id_to_index.contains(id)) return;
     auto idx = id_to_index[id];
     auto &order = order_pool[idx];
-    SymbolBook* book = findBook(symbol);
+    SymbolBook* book = findBook(instrument_id);
     if (!book) return;
     auto &arr = (order.side == databento::Side::Bid) ? book->bids : book->asks;
 
@@ -203,8 +203,8 @@ void FeedHandler::trade(uint64_t id, databento::Side &side, int64_t &price, std:
     }
 }
 
-void FeedHandler::addOrder(Order& entry, databento::Side &side, int64_t &price, std::basic_string<char> &symbol) {
-    SymbolBook* book = findBook(symbol);
+void FeedHandler::addOrder(Order& entry, databento::Side &side, int64_t &price, uint32_t instrument_id) {
+    SymbolBook* book = findBook(instrument_id);
     if (!book) return;
     auto& arr = (side == databento::Side::Bid) ? book->bids : book->asks;
     if (!arr.ticks) return;
@@ -220,12 +220,12 @@ void FeedHandler::addOrder(Order& entry, databento::Side &side, int64_t &price, 
     this->push(price_pool[lvl_idx], entry);
 }
 
-void FeedHandler::cancelOrder(const uint64_t &id, std::basic_string<char> &symbol) {
+void FeedHandler::cancelOrder(const uint64_t &id, uint32_t instrument_id) {
     if (!id_to_index.contains(id)) return;
     uint32_t idx = id_to_index[id];
     auto &order = order_pool[idx];
 
-    SymbolBook* book = findBook(symbol);
+    SymbolBook* book = findBook(instrument_id);
     if (!book) return;
     auto &arr = (order.side == databento::Side::Bid) ? book->bids : book->asks;
 
