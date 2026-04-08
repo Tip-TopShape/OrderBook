@@ -7,10 +7,36 @@
 #include <cstring>
 #include <time.h>
 
+#if defined(__x86_64__) || defined(_M_X64)
+#  include <x86intrin.h>
+static inline uint64_t rdtsc() { return __rdtsc(); }
+#elif defined(__aarch64__)
+static inline uint64_t rdtsc() {
+    uint64_t val;
+    asm volatile("mrs %0, cntvct_el0" : "=r"(val));
+    return val;
+}
+#else
+#  error "rdtsc: unsupported arch"
+#endif
+
+static const double tsc_ns_per_tick = [] {
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &t0);
+    uint64_t c0 = rdtsc();
+    struct timespec deadline = {t0.tv_sec, t0.tv_nsec + 5'000'000};
+    if (deadline.tv_nsec >= 1'000'000'000) { ++deadline.tv_sec; deadline.tv_nsec -= 1'000'000'000; }
+    do { clock_gettime(CLOCK_MONOTONIC_RAW, &t1); }
+    while (t1.tv_sec < deadline.tv_sec ||
+           (t1.tv_sec == deadline.tv_sec && t1.tv_nsec < deadline.tv_nsec));
+    uint64_t c1 = rdtsc();
+    uint64_t ns = (uint64_t)(t1.tv_sec - t0.tv_sec) * 1'000'000'000ULL
+                + (uint64_t)(t1.tv_nsec - t0.tv_nsec);
+    return (double)ns / (double)(c1 - c0);
+}();
+
 static inline uint64_t now_ns() {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
-    return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+    return (uint64_t)(rdtsc() * tsc_ns_per_tick);
 }
 
 struct MatchingMetrics {
