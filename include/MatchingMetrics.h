@@ -9,7 +9,10 @@
 
 #if defined(__x86_64__) || defined(_M_X64)
 #  include <x86intrin.h>
-static inline uint64_t rdtsc() { return __rdtsc(); }
+static inline uint64_t rdtsc() {
+    unsigned int aux;
+    return __rdtscp(&aux);
+}
 #elif defined(__aarch64__)
 static inline uint64_t rdtsc() {
     uint64_t val;
@@ -20,7 +23,7 @@ static inline uint64_t rdtsc() {
 #  error "rdtsc: unsupported arch"
 #endif
 
-static const double tsc_ns_per_tick = [] {
+static const uint64_t tsc_mul = [] {
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC_RAW, &t0);
     uint64_t c0 = rdtsc();
@@ -32,11 +35,11 @@ static const double tsc_ns_per_tick = [] {
     uint64_t c1 = rdtsc();
     uint64_t ns = (uint64_t)(t1.tv_sec - t0.tv_sec) * 1'000'000'000ULL
                 + (uint64_t)(t1.tv_nsec - t0.tv_nsec);
-    return (double)ns / (double)(c1 - c0);
+    return ((__uint128_t)ns << 32) / (c1 - c0);
 }();
 
 static inline uint64_t now_ns() {
-    return (uint64_t)(rdtsc() * tsc_ns_per_tick);
+    return ((__uint128_t)rdtsc() * tsc_mul) >> 32;
 }
 
 struct MatchingMetrics {
