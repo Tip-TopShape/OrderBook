@@ -24,6 +24,9 @@
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS MAP_ANON
 #endif
+#ifndef MAP_POPULATE
+#define MAP_POPULATE 0
+#endif
 
 #include "../include/priceLevel.h"
 #include "../include/MatchingMetrics.h"
@@ -56,7 +59,7 @@ struct Pool {
             nullptr,
             CAPACITY * sizeof(T),
             PROT_READ | PROT_WRITE,
-            MAP_PRIVATE | MAP_ANONYMOUS,
+            MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE,
             -1, 0
         ));
 
@@ -160,12 +163,6 @@ public:
 
     void registerSymbol(uint32_t id, const std::string& symbol) {
         id_to_symbol_[id] = symbol;
-    }
-
-    const std::string& getSymbol(uint32_t id) const {
-        static const std::string empty;
-        if (!id_to_symbol_.contains(id)) return empty;
-        return id_to_symbol_.at(id);
     }
 
     void prep(const std::basic_string<char>& symbol,
