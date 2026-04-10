@@ -24,9 +24,9 @@
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS MAP_ANON
 #endif
-#ifndef MAP_POPULATE
-#define MAP_POPULATE 0
-#endif
+// #ifndef MAP_POPULATE
+// #define MAP_POPULATE 0
+// #endif
 
 #include "../include/priceLevel.h"
 #include "../include/MatchingMetrics.h"
@@ -46,35 +46,24 @@ struct SymbolBook {
 
 template <typename T, size_t CAPACITY>
 struct Pool {
-    T*   storage; // pool of orders
-    uint32_t freelist[CAPACITY];
-    uint32_t freelist_top;
+    T*       storage;
+    uint32_t head;
 
-    Pool() : freelist_top(CAPACITY) {
-        for (uint32_t i = 0; i < CAPACITY; ++i) {
-            freelist[i] = i;
-        }
-
+    Pool() {
         storage = static_cast<T*>(mmap(
             nullptr,
             CAPACITY * sizeof(T),
             PROT_READ | PROT_WRITE,
-            MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE,
+            MAP_PRIVATE | MAP_ANONYMOUS,
             -1, 0
         ));
-
-        if (storage == MAP_FAILED) {
-            storage = nullptr;
-            return;
-        }
-
         mlock(storage, CAPACITY * sizeof(T));
-    }
 
-    ~Pool() {
-        if (storage && storage != MAP_FAILED) {
-            munmap(storage, CAPACITY * sizeof(T));
+        for (uint32_t i = 0; i < CAPACITY - 1; ++i) {
+            *reinterpret_cast<uint32_t*>(&storage[i]) = i + 1;
         }
+        *reinterpret_cast<uint32_t*>(&storage[CAPACITY - 1]) = UINT32_MAX;
+        head = 0;
     }
 
     uint32_t allocate() {
@@ -89,9 +78,7 @@ struct Pool {
         head = idx;
     }
 
-    T& operator[](uint32_t idx) {
-        return storage[idx];
-    }
+    T& operator[](uint32_t idx) { return storage[idx]; }
 
 }; // end of pool
 
