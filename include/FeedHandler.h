@@ -78,16 +78,15 @@ struct Pool {
     }
 
     uint32_t allocate() {
-        if (freelist_top == 0) {
-            return UINT32_MAX; // Pool exhausted
-        }
-        return freelist[--freelist_top];
+        if (head == UINT32_MAX) return UINT32_MAX;
+        uint32_t idx = head;
+        head = *reinterpret_cast<uint32_t*>(&storage[idx]);
+        return idx;
     }
 
     void free(uint32_t idx) {
-        if (freelist_top < CAPACITY) {
-            freelist[freelist_top++] = idx;
-        }
+        *reinterpret_cast<uint32_t*>(&storage[idx]) = head;
+        head = idx;
     }
 
     T& operator[](uint32_t idx) {

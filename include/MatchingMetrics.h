@@ -71,9 +71,9 @@ struct MatchingMetrics {
             uint64_t cmltv = 0;
             for (size_t i = 0; i < BUCKETS; ++i) {
                 cmltv += counts[i];
-                if (!p50  && cmltv > t50)  p50  = (1ULL << i);
-                if (!p99  && cmltv > t99)  p99  = (1ULL << i);
-                if (!p999 && cmltv > t999) p999 = (1ULL << i);
+                if (!p50  && cmltv > t50)  p50  = (3ULL << (i-1));
+                if (!p99  && cmltv > t99)  p99  = (3ULL << (i-1));
+                if (!p999 && cmltv > t999) p999 = (3ULL << (i-1));
             }
         }
     };
@@ -167,6 +167,7 @@ struct MatchingMetrics {
 
     void printCSVLine(std::ostream &os, uint64_t recordCount) {
         endWindow();
+	latencyHist.percentile();
         os << recordCount << ","
            << std::fixed << std::setprecision(0) << throughputPerSec << ","
            << latencyHist.p50 << ","
