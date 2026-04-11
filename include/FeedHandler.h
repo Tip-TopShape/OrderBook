@@ -57,13 +57,23 @@ struct Pool {
             MAP_PRIVATE | MAP_ANONYMOUS,
             -1, 0
         ));
+
+        if (storage == MAP_FAILED) {
+            storage = nullptr;
+            head = UINT32_MAX;
+            return;
+        }
+
         mlock(storage, CAPACITY * sizeof(T));
 
-        for (uint32_t i = 0; i < CAPACITY - 1; ++i) {
+        for (uint32_t i = 0; i < CAPACITY - 1; ++i)
             *reinterpret_cast<uint32_t*>(&storage[i]) = i + 1;
-        }
         *reinterpret_cast<uint32_t*>(&storage[CAPACITY - 1]) = UINT32_MAX;
         head = 0;
+    }
+
+    ~Pool() {
+        if (storage) munmap(storage, CAPACITY * sizeof(T));
     }
 
     uint32_t allocate() {
