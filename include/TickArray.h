@@ -23,11 +23,7 @@ public:
     TickArray() = default;
 
     struct Slot {
-        T        price;
         uint32_t level_idx;
-        bool     active;
-
-        Slot() : price(0), level_idx(0), active(false) {}
     };
 
     Slot* ticks = nullptr;
@@ -124,7 +120,7 @@ public:
                 minPrice = INT64_MAX;
                 return;
             }
-            if (ticks[idx].active) return;
+            if (ticks[idx].level_idx != UINT32_MAX) return;
         } while (true);
     }
 
@@ -137,7 +133,7 @@ public:
                 maxPrice = INT64_MIN;
                 return;
             }
-            if (ticks[idx].active) return;
+            if (ticks[idx].level_idx != UINT32_MAX) return;
         } while (true);
     }
 
@@ -161,20 +157,19 @@ public:
         if (price < minPrice) minPrice = price;
         if (price > maxPrice) maxPrice = price;
 
-        return ticks[idx].active ? ticks[idx].level_idx : UINT32_MAX;
+        return ticks[idx].level_idx;
     }
 
     void activate(const T& price, uint32_t pool_idx) {
         size_t idx = toIndex(price);
         if (idx == SIZE_MAX) return;
         ticks[idx].level_idx = pool_idx;
-        ticks[idx].active = true;
     }
 
     void deactivate(const T& price) {
         size_t idx = toIndex(price);
         if (idx == SIZE_MAX) return;
-        ticks[idx].active = false;
+        ticks[idx].level_idx = UINT32_MAX;
     }
 
     uint32_t bestAsk() {
