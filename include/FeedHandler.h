@@ -24,9 +24,9 @@
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS MAP_ANON
 #endif
-// #ifndef MAP_POPULATE
-// #define MAP_POPULATE 0
-// #endif
+#ifndef MAP_POPULATE
+#define MAP_POPULATE 0
+#endif
 
 #include "../include/priceLevel.h"
 #include "../include/MatchingMetrics.h"
@@ -54,7 +54,7 @@ struct Pool {
             nullptr,
             CAPACITY * sizeof(T),
             PROT_READ | PROT_WRITE,
-            MAP_PRIVATE | MAP_ANONYMOUS,
+            MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE,
             -1, 0
         ));
 
