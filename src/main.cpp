@@ -6,7 +6,7 @@
 static constexpr int64_t DATABENTO_TO_CENTS = 10'000'000;
 static const std::string REF_PRICES_FILE = "ref_prices.bin";
 static constexpr int64_t TICK_SIZE = 10;
-static constexpr int64_t HALF_RANGE = 25000;
+static constexpr int64_t HALF_RANGE = 5000;
 static constexpr int REPORT_INTERVAL = 1000000;
 
 std::string timestamp() {
@@ -125,12 +125,11 @@ int main(int argc, char *argv[]) {
         int64_t price = msg.price / DATABENTO_TO_CENTS;
         auto qty = msg.size;
         auto side = msg.side;
-        std::basic_string<char> symbol = feed->getSymbol(msg.hd.instrument_id);
         auto action = msg.action;
         auto ts_recv = msg.ts_recv;
         auto ts_in_delta = msg.ts_in_delta;
 
-        feed->processOrder(orderId, side, symbol, action, price, qty, ts_recv, ts_in_delta);
+        feed->processOrder(orderId, side, msg.hd.instrument_id, action, price, qty, ts_recv, ts_in_delta);
         record = reader.NextRecord();
         ++counter;
 
