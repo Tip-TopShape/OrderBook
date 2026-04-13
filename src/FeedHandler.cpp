@@ -43,11 +43,11 @@ void FeedHandler::processOrder(uint64_t &id,
             ++metrics_.cancels;
             break;
         case databento::Action::Trade:
-            this->trade(id, side, price, instrument_id);
+            this->trade(id, side, price, qty, instrument_id);
             ++metrics_.trades;
             break;
         case databento::Action::Fill:
-            this->trade(id, side, price, instrument_id);
+            this->trade(id, side, price, qty, instrument_id);
             ++metrics_.fills;
             break;
         default:
@@ -181,7 +181,7 @@ bool FeedHandler::modifyOrder(uint64_t order_id, int64_t new_price, uint32_t new
     }
 }
 
-void FeedHandler::trade(uint64_t id, databento::Side &side, int64_t &price, uint32_t instrument_id) {
+void FeedHandler::trade(uint64_t id, databento::Side &side, int64_t &price, uint32_t qty, uint32_t instrument_id) {
     if (!id_to_index.contains(id)) return;
     auto idx = id_to_index[id];
     auto &order = order_pool[idx];
@@ -192,7 +192,13 @@ void FeedHandler::trade(uint64_t id, databento::Side &side, int64_t &price, uint
     uint32_t lvl_idx = arr.find(order.price);
     if (lvl_idx == UINT32_MAX) return;
     priceLevel &level = price_pool[lvl_idx];
-    order.qty = std::min(0u, (order.qty - order.qty));
+
+    if (order.qty <= qty) {
+        order.qty = 0;
+    } else {
+        order.qty -= qty;
+    }
+
     if (order.qty == 0) {
         popOrder(level, idx);
         if (level.isEmpty()) {

@@ -153,7 +153,7 @@ public:
     void match(Order& entry, databento::Side &side, int64_t &price, uint32_t instrument_id);
     bool modifyOrder(uint64_t order_id, int64_t new_price, uint32_t new_qty, uint32_t instrument_id);
 
-    void trade(uint64_t id, databento::Side &side, int64_t &price, uint32_t instrument_id);
+    void trade(uint64_t id, databento::Side &side, int64_t &price, uint32_t qty, uint32_t instrument_id);
     void addOrder(Order& entry, databento::Side &side, int64_t &price, uint32_t instrument_id);
     void cancelOrder(const uint64_t &id, uint32_t instrument_id);
 
