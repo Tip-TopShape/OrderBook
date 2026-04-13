@@ -6,9 +6,7 @@
 #   ./benchmark.sh --10      # run 10M records
 #   ./benchmark.sh --csv --5 # run 5M, save CSV
 
-set -e
-
-cmake -B build -DCMAKE_BUILD_TYPE=Release 2>&1 | grep -v "^\-\-"
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="" 2>&1 | grep -v "^\-\-"
 cmake --build build --parallel
 
 ./build/OrderBook "$@"
