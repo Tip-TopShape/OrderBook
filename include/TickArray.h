@@ -36,7 +36,6 @@ public:
     int64_t base_price;
     int64_t tick_size;
     size_t capacity;
-    // Prices are now normalized to cents ($1.00 = 100)
 
     static constexpr size_t MAX_SLOTS = 5000;
 

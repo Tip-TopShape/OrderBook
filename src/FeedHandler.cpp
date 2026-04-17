@@ -14,15 +14,6 @@ void FeedHandler::processOrder(uint64_t &id,
                                 databento::UnixNanos &ts_recv,
                                 databento::TimeDeltaNanos &ts_event)
 {
-    /*
-        Add	A	Insert a new order into the book.
-        Modify	M	Change an order's price and/or size.
-        Cancel	C	Fully or partially cancel an order from the book.
-        Clear	R	Remove all resting orders for the instrument.
-        Trade	T	An aggressing order traded. Does not affect the book.
-        Fill	F	A resting order was filled. Does not affect the book.
-        None	N	No action: does not affect the book, but may carry flags or other information.
-     */
     auto newOrder = Order(ts_recv, ts_event, side, qty, price);
     newOrder.id = id;
     bool priceChange = false;
@@ -174,9 +165,6 @@ bool FeedHandler::modifyOrder(uint64_t order_id, int64_t new_price, uint32_t new
             price_pool.free(lvl_idx);
             arr.decrementSize();
         }
-        // order.price = new_price;
-        // order.qty = new_qty;
-        // auto newLevel = book.find(new_price);
         return true;
     }
 }

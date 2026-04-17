@@ -7,18 +7,11 @@
 
 
 #include <string>
-#include <fstream>
-#include <sstream>
-#include <map>
 #include <unordered_map>
-#include <chrono>
-#include <atomic>
 #include <iostream>
 #include <vector>
-#include <array>
 #include <cstdint>
 #include <algorithm>
-#include <utility>
 #include <sys/mman.h>
 
 #ifndef MAP_ANONYMOUS
@@ -90,7 +83,7 @@ struct Pool {
 
     T& operator[](uint32_t idx) { return storage[idx]; }
 
-}; // end of pool
+};
 
 class FeedHandler {
 private:
@@ -193,9 +186,6 @@ public:
         level.head = toRemove._next;
 
         if (level.head == NULL_INDEX) {
-            // if (level.tail == NULL_INDEX && level.head != NULL_INDEX) {// 6095691568
-            //     std::cout << "here";
-            // }
             level.tail = NULL_INDEX;
         } else {
             order_pool[level.head]._prev = NULL_INDEX;
@@ -241,14 +231,8 @@ public:
 
         if (level.isEmpty()) {
             level.head = idx;
-            //     if (level.tail == NULL_INDEX && level.head != NULL_INDEX) {// 6095691568
-            //     std::cout << "here";
-            // }
             level.tail = idx;
         } else {
-            // if (level.tail == NULL_INDEX && level.head != NULL_INDEX) {// 6095691568
-            //     std::cout << "here";
-            // }
             order_pool[level.tail]._next = idx;
             level.tail = idx;
         }

@@ -46,20 +46,29 @@ bool loadRefPrices(std::unordered_map<uint32_t, int64_t>& prices, const std::str
 int main(int argc, char *argv[]) {
     bool csv_mode = false;
     int64_t max_records = INT64_MAX;
+    std::string data_path;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--csv") {
             csv_mode = true;
+        } else if (arg.substr(0, 7) == "--file=") {
+            data_path = arg.substr(7);
         } else if (arg.substr(0, 2) == "--" && arg.size() > 2) {
             max_records = std::stoll(arg.substr(2)) * 1'000'000;
         }
     }
+    
+    // forgot clear message when downloading test data :)
+    static const std::string DEFAULT_CLEAR  = "12152025/XNAS-20251222-CLEAR/xnas-itch-20251215.mbo.dbn.zst";
+    static const std::string DEFAULT_NASDAQ = "12152025/XNAS-20251221-NASDAQ/xnas-itch-20251215.mbo.dbn.zst";
+    const std::string& main_path  = data_path.empty() ? DEFAULT_NASDAQ : data_path;
+    const std::string& clear_path = data_path.empty() ? DEFAULT_CLEAR  : data_path;
 
     auto feed = std::make_unique<FeedHandler>();
 
-    auto reader0 = databento::DbnFileStore("12152025/XNAS-20251222-CLEAR/xnas-itch-20251215.mbo.dbn.zst");
-    auto reader = databento::DbnFileStore("12152025/XNAS-20251221-NASDAQ/xnas-itch-20251215.mbo.dbn.zst");
+    auto reader0 = databento::DbnFileStore(clear_path);
+    auto reader = databento::DbnFileStore(main_path);
 
     const auto& metadata = reader.GetMetadata();
     for (const auto& mapping : metadata.mappings) {
@@ -70,7 +79,7 @@ int main(int argc, char *argv[]) {
 
     std::unordered_map<uint32_t, int64_t> ref_prices;
     if (!loadRefPrices(ref_prices, REF_PRICES_FILE)) {
-        auto prepass_reader = databento::DbnFileStore("12152025/XNAS-20251221-NASDAQ/xnas-itch-20251215.mbo.dbn.zst");
+        auto prepass_reader = databento::DbnFileStore(main_path);
         auto record = prepass_reader.NextRecord();
         while (record != nullptr) {
             if (record->RType() == databento::RType::Mbo) {
