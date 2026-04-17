@@ -42,7 +42,7 @@ static inline uint64_t now_ns() {
     return ((__uint128_t)rdtsc() * tsc_mul) >> 32;
 }
 
-struct MatchingMetrics {
+struct Metrics {
 
     struct LatencyHistogram {
         static constexpr size_t BUCKETS = 64;

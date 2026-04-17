@@ -1,7 +1,3 @@
-//
-// Created by Eleazar Vega on 12/14/25.
-//
-
 #ifndef FEEDHANDLER_H
 #define FEEDHANDLER_H
 
@@ -22,7 +18,7 @@
 #endif
 
 #include "../include/priceLevel.h"
-#include "../include/MatchingMetrics.h"
+#include "../include/Metrics.h"
 #include "TickArray.h"
 
 
@@ -95,7 +91,7 @@ private:
     Pool<priceLevel, MAX_LEVELS> price_pool;
     SymbolBook* book_by_id[MAX_INSTRUMENT_ID] = {};
 
-    MatchingMetrics metrics_;
+    Metrics metrics_;
 
     SymbolBook* findBook(const std::basic_string<char>& symbol) {
         SymbolBook target;
@@ -118,7 +114,7 @@ public:
     FeedHandler& operator=(const FeedHandler&) = delete;
     ~FeedHandler() = default;
 
-    MatchingMetrics& getMetrics() { return metrics_; }
+    Metrics& getMetrics() { return metrics_; }
     size_t calculateMemoryUsed() const;
 
     void printMetrics(std::ostream &os, uint64_t recordCount) {

@@ -19,5 +19,5 @@ add_executable(OrderBook src/main.cpp
         include/FeedHandler.h
         src/FeedHandler.cpp
         include/priceLevel.h
-        include/MatchingMetrics.h)
+        include/Metrics.h)
 target_link_libraries(OrderBook PRIVATE databento::databento)

@@ -58,7 +58,7 @@ int main(int argc, char *argv[]) {
             max_records = std::stoll(arg.substr(2)) * 1'000'000;
         }
     }
-    
+
     // forgot clear message when downloading test data :)
     static const std::string DEFAULT_CLEAR  = "12152025/XNAS-20251222-CLEAR/xnas-itch-20251215.mbo.dbn.zst";
     static const std::string DEFAULT_NASDAQ = "12152025/XNAS-20251221-NASDAQ/xnas-itch-20251215.mbo.dbn.zst";
@@ -112,7 +112,7 @@ int main(int argc, char *argv[]) {
         std::filesystem::create_directories("runs");
         std::string csv_path = "runs/" + timestamp() + ".csv";
         csv_file.open(csv_path);
-        MatchingMetrics::printCSVHeader(csv_file);
+        Metrics::printCSVHeader(csv_file);
         std::cout << "Saving to " << csv_path << "\n";
     }
 

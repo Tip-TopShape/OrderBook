@@ -1,7 +1,3 @@
-//
-// Created by Eleazar Vega on 2/28/26.
-//
-
 #ifndef TICKARRAY_H
 #define TICKARRAY_H
 

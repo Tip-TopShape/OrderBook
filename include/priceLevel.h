@@ -1,7 +1,3 @@
-//
-// Created by Eleazar Vega on 12/31/25.
-//
-
 #ifndef PRICELEVEL_H
 #define PRICELEVEL_H
 

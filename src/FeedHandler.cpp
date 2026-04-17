@@ -1,7 +1,3 @@
-//
-// Created by Eleazar Vega on 12/14/25.
-//
-
 #include "../include/FeedHandler.h"
 #include <algorithm>
 
