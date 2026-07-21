@@ -21,9 +21,9 @@ void FeedHandler::processOrder(uint64_t &id,
             break;
         case databento::Action::Modify:
             priceChange = this->modifyOrder(id, price, qty, instrument_id);
+            ++metrics_.modifies;
             if (priceChange)
                 this->addOrder(newOrder, side, price, instrument_id);
-            ++metrics_.modifies;
             break;
         case databento::Action::Cancel:
             this->cancelOrder(id, instrument_id);
@@ -46,7 +46,7 @@ void FeedHandler::processOrder(uint64_t &id,
 }
 
 void FeedHandler::match(Order& entry, databento::Side &side, int64_t &price, uint32_t instrument_id) {
-    auto matchStart = now_ns();
+auto matchStart = now_ns();
     bool fulfilled = false;
 
     SymbolBook* book = findBook(instrument_id);

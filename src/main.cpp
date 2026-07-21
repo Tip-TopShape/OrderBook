@@ -60,8 +60,8 @@ int main(int argc, char *argv[]) {
     }
 
     // forgot clear message when downloading test data :)
-    static const std::string DEFAULT_CLEAR  = "12152025/XNAS-20251222-CLEAR/xnas-itch-20251215.mbo.dbn.zst";
-    static const std::string DEFAULT_NASDAQ = "12152025/XNAS-20251221-NASDAQ/xnas-itch-20251215.mbo.dbn.zst";
+    static const std::string DEFAULT_CLEAR  = "../12152025/XNAS-20251222-CLEAR/xnas-itch-20251215.mbo.dbn.zst";
+    static const std::string DEFAULT_NASDAQ = "../12152025/XNAS-20251221-NASDAQ/xnas-itch-20251215.mbo.dbn.zst";
     const std::string& main_path  = data_path.empty() ? DEFAULT_NASDAQ : data_path;
     const std::string& clear_path = data_path.empty() ? DEFAULT_CLEAR  : data_path;
 
