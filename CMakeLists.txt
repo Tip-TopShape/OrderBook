@@ -14,10 +14,20 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(databento)
 
+FetchContent_Declare(
+    unordered_dense
+    GIT_REPOSITORY https://github.com/martinus/unordered_dense.git
+    GIT_TAG v4.4.0
+)
+FetchContent_MakeAvailable(unordered_dense)
+
+
 
 add_executable(OrderBook src/main.cpp
-        include/FeedHandler.h
-        src/FeedHandler.cpp
-        include/priceLevel.h
-        include/Metrics.h)
+include/FeedHandler.h
+src/FeedHandler.cpp
+include/priceLevel.h
+include/Metrics.h)
+
 target_link_libraries(OrderBook PRIVATE databento::databento)
+target_link_libraries(OrderBook PRIVATE unordered_dense::unordered_dense)

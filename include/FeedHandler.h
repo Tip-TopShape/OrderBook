@@ -2,11 +2,12 @@
 #define FEEDHANDLER_H
 
 #include <algorithm>
+#include <ankerl/unordered_dense.h>
 #include <cstdint>
 #include <iostream>
 #include <string>
 #include <sys/mman.h>
-#include <unordered_map>
+#include <sys/types.h>
 #include <vector>
 
 #ifndef MAP_ANONYMOUS
@@ -82,9 +83,8 @@ class FeedHandler {
 private:
   static constexpr uint32_t MAX_INSTRUMENT_ID = 100000;
   std::vector<SymbolBook> books;
-  // std::unordered_map<uint32_t, std::string> id_to_symbol_;
   std::array<std::basic_string<char>, MAX_INSTRUMENT_ID> id_to_symbol_;
-  std::unordered_map<uint64_t, uint32_t> id_to_index;
+  ankerl::unordered_dense::map<uint64_t, uint32_t> id_to_index;
   Pool<Order, MAX_SIZE> order_pool;
   Pool<priceLevel, MAX_LEVELS> price_pool;
   SymbolBook *book_by_id[MAX_INSTRUMENT_ID] = {};
