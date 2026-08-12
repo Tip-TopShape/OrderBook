@@ -91,6 +91,9 @@ private:
 
   Metrics metrics_;
 
+  static constexpr uint32_t LATENCY_SAMPLE_RATE = 16;
+  uint64_t orderCount_ = 0;
+
   SymbolBook *findBook(const std::basic_string<char> &symbol) {
     SymbolBook target;
     target.symbol = symbol;

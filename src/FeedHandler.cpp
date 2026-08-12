@@ -13,7 +13,14 @@ void FeedHandler::processOrder(uint64_t &id,
     auto newOrder = Order(ts_recv, ts_event, side, qty, price);
     newOrder.id = id;
     bool priceChange = false;
-    auto t0 = now_ns();
+
+    ++orderCount_;
+    bool sampleLatency = orderCount_ % LATENCY_SAMPLE_RATE == 0;
+    uint64_t t0 = 0;
+    if (sampleLatency) {
+        t0 = now_ns();
+    }
+
     switch (action) {
         case databento::Action::Add:
             this->addOrder(newOrder, side, price, instrument_id);
@@ -40,8 +47,10 @@ void FeedHandler::processOrder(uint64_t &id,
         default:
             break;
     }
-    auto t1 = now_ns();
-    metrics_.recordLatency(t1 - t0);
+    if (sampleLatency) {
+        uint64_t t1 = now_ns();
+        metrics_.recordLatency(t1 - t0);
+    }
     metrics_.recordOrder();
 }
 
