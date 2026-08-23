@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <hdr_histogram.h>
 #include <iomanip>
 #include <iostream>
 #include <sys/types.h>
@@ -51,66 +52,39 @@ static inline uint64_t now_ns() {
 struct Metrics {
 
   struct LatencyHistogram {
-    static constexpr size_t BUCKETS = 512;
-    static constexpr int SUB_BITS = 3;
-    static constexpr int SUB_COUNT = 1 << SUB_BITS;
+    static constexpr int64_t LOWEST = 1;
+    static constexpr int64_t HIGHEST = 10'000'000'000LL;
+    static constexpr int SIGFIG = 3;
 
-    uint64_t counts[BUCKETS]{};
-    uint64_t total{0};
+    struct hdr_histogram *histogram{nullptr};
+
+    LatencyHistogram() { hdr_init(LOWEST, HIGHEST, SIGFIG, &histogram); }
+
+    ~LatencyHistogram() {
+      if (histogram)
+        hdr_close(histogram);
+    }
+
+    LatencyHistogram(const LatencyHistogram &) = delete;
+    LatencyHistogram &operator=(const LatencyHistogram &) = delete;
 
     void record(uint64_t ns) {
-      size_t b = (ns < 2) ? 0 : (63 - __builtin_clzll(ns));
-      if (ns < 2) {
-        ++counts[0];
-        ++total;
-        return;
-      }
-
-      size_t msb = 63 - __builtin_clzll(ns);
-      size_t shift = (msb > SUB_BITS) ? msb - SUB_BITS : 0;
-      size_t sub_buck = (ns >> shift) & (SUB_COUNT - 1);
-      size_t bucket = (msb << SUB_BITS) | sub_buck;
-
-      ++counts[bucket];
-      ++total;
+      hdr_record_value(histogram,
+                       ns < LOWEST ? LOWEST : static_cast<int64_t>(ns));
     }
 
     void reset() {
-      memset(counts, 0, sizeof(counts));
-      total = p50 = p99 = p999 = 0;
-    }
-
-    uint64_t calcSub(size_t bucket) {
-      size_t msb = bucket >> SUB_BITS;
-      size_t sub = bucket & (SUB_COUNT - 1);
-      if (msb == 0)
-        return sub;
-
-      size_t shift = (msb > sub) ? msb - SUB_BITS : 0;
-      uint64_t base = (1ULL << msb);
-      uint64_t sub_width = base >> SUB_BITS;
-      return base + (sub * sub_width);
+      hdr_reset(histogram);
+      p50 = p99 = p999 = 0;
     }
 
     uint64_t p50{0};
     uint64_t p99{0};
     uint64_t p999{0};
     void percentile() {
-      if (total == 0)
-        return;
-      const uint64_t t50 = static_cast<uint64_t>(0.500 * total);
-      const uint64_t t99 = static_cast<uint64_t>(0.990 * total);
-      const uint64_t t999 = static_cast<uint64_t>(0.999 * total);
-      uint64_t cmltv = 0;
-      for (size_t i = 0; i < BUCKETS; ++i) {
-        cmltv += counts[i];
-        if (!p50 && cmltv > t50)
-          p50 = calcSub(i);
-        if (!p99 && cmltv > t99)
-          p99 = calcSub(i);
-        if (!p999 && cmltv > t999)
-          p999 = calcSub(i);
-      }
+      p50 = static_cast<uint64_t>(hdr_value_at_percentile(histogram, 50.0));
+      p99 = static_cast<uint64_t>(hdr_value_at_percentile(histogram, 99.0));
+      p999 = static_cast<uint64_t>(hdr_value_at_percentile(histogram, 99.9));
     }
   };
 

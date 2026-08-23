@@ -21,6 +21,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(unordered_dense)
 
+FetchContent_Declare(
+    hdrhistogram
+    GIT_REPOSITORY https://github.com/HdrHistogram/HdrHistogram_c.git
+    GIT_TAG 0.9.9
+)
+FetchContent_MakeAvailable(hdrhistogram)
+
 
 
 add_executable(OrderBook src/main.cpp
@@ -31,3 +38,4 @@ include/Metrics.h)
 
 target_link_libraries(OrderBook PRIVATE databento::databento)
 target_link_libraries(OrderBook PRIVATE unordered_dense::unordered_dense)
+target_link_libraries(OrderBook PRIVATE hdr_histogram_static)

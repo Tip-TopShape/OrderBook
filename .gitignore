@@ -5,6 +5,7 @@ CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 Makefile
+compile_commands.json
 
 # Third-party libraries (fetched via CMake FetchContent)
 _deps/
