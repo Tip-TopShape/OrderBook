@@ -14,13 +14,13 @@ No maps, each side of the book is a direct-mapped array indexed by price tick. L
 Orders and price levels are pre-allocated with `mmap`+`mlock` into pools. `MAP_POPULATE` is used to avoid page faults mid-processing. The free-list is embedded directly in the pool storage, so no heap allocator in the hot path at all.
 
 **Order queues — linked list via pool indices**
-Each price level holds a doubly-linked FIFO queue of orders using 32-bit pool indices instead of pointers. Head fills first. Cancel is O(1) via an `order_id → pool index` hashmap. Using indices instead of pointers reduces node size and helps cache density.
+Each price level holds a doubly-linked FIFO queue of orders using pool indices instead of pointers. Cancel is O(1) via an `order_id → pool index` hashmap (`unordered_dense`).
 
 **Instrument lookup**
-`book_by_id[instrument_id]` — direct array index, no hash, no branch.
+`book_by_id[instrument_id]` — direct array index. Symbol → instrument id is a flat array, no hash maps.
 
 **Performance**
-Latency is measured per-order with `rdtscp` (serialized reads) calibrated against `CLOCK_MONOTONIC_RAW` at startup. Bucketed into a power-of-2 histogram and reported as p50/p99/p99.9
+Latency is measured with `rdtscp` calibrated against `CLOCK_MONOTONIC_RAW` at startup, sampled 1-in-16 orders to keep the latency check off the hot path. Fed into HdrHistogram and reported as p50/p99/p99.9.
 
 
 ## Build
@@ -43,3 +43,5 @@ Or just use the script:
 
 ## Dependencies
 - [databento-cpp](https://github.com/databento/databento-cpp) v0.51.0
+- [unordered_dense](https://github.com/martinus/unordered_dense) v4.4.0
+- [HdrHistogram_c](https://github.com/HdrHistogram/HdrHistogram_c) 0.9.9
