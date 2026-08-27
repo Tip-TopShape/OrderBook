@@ -8,10 +8,10 @@ NOTE: Match() is dead code. Kept just in case...
 ## How it works
 
 **Price levels — TickArray**
-No maps, each side of the book is a direct-mapped array indexed by price tick. Lookup O(1). Best bid/ask are tracked as running min/max so there's no scan. Ref prices is computed during a pre-pass. To avoid API usage cost, I pre-pass the same dataset instead of previous day. I acknowledge that this is not ideal and plan on improving this with more datasets/sources and handle the scenario where the tick size goes above/below the bounds.
+I choose to avoid maps, each side of the book is a direct-mapped array indexed by price tick. Lookup O(1). Best bid/ask are tracked as running min/max. Ref prices is computed during a pre-pass. To avoid API usage cost, I pre-pass the same dataset instead of previous day. I acknowledge that this is not ideal and plan on improving this with more datasets/sources and handle the scenario where the tick size goes above/below the bounds.
 
 **Memory — pool allocator**
-Orders and price levels are pre-allocated with `mmap`+`mlock` into pools. `MAP_POPULATE` is used to avoid page faults mid-processing. The free-list is embedded directly in the pool storage, so no heap allocator in the hot path at all.
+Orders and price levels are pre-allocated with `mmap`+`mlock` into pools. `MAP_POPULATE`. The free-list is embedded directly in the pool storage, so no heap allocator in the hot path at all.
 
 **Order queues — linked list via pool indices**
 Each price level holds a doubly-linked FIFO queue of orders using pool indices instead of pointers. Cancel is O(1) via an `order_id → pool index` hashmap (`unordered_dense`).
@@ -20,7 +20,7 @@ Each price level holds a doubly-linked FIFO queue of orders using pool indices i
 `book_by_id[instrument_id]` — direct array index. Symbol → instrument id is a flat array, no hash maps.
 
 **Performance**
-Latency is measured with `rdtscp` calibrated against `CLOCK_MONOTONIC_RAW` at startup, sampled 1-in-16 orders to keep the latency check off the hot path. Fed into HdrHistogram and reported as p50/p99/p99.9.
+Latency is measured with `rdtscp` calibrated against `CLOCK_MONOTONIC_RAW` at startup, sampled every 16 orders to keep the latency check off the hot path. Tracked per action in csv, but the live console output shows an aggregated p50/p99/p99.9 across all actions.
 
 
 ## Build

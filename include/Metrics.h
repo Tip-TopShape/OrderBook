@@ -88,13 +88,24 @@ struct Metrics {
     }
   };
 
+  enum class ActionType : size_t {
+    Add = 0,
+    Modify = 1,
+    Cancel = 2,
+    Trade = 3,
+    Fill = 4
+  };
+  static constexpr const size_t NUM_ACTIONS = 5;
+  static constexpr const char *ACTION_NAMES[NUM_ACTIONS] = {
+      "add", "modify", "cancel", "trade", "fill"};
+
   uint64_t ordersProcessed{0};
   uint64_t adds{0};
   uint64_t modifies{0};
   uint64_t cancels{0};
   uint64_t trades{0};
   uint64_t fills{0};
-  LatencyHistogram latencyHist;
+  LatencyHistogram latencyHist[NUM_ACTIONS];
 
   uint64_t windowStart{0};
   uint64_t ordersInWindow{0};
@@ -108,7 +119,9 @@ struct Metrics {
   }
 
   void recordOrder() { ++ordersInWindow; }
-  void recordLatency(uint64_t ns) { latencyHist.record(ns); }
+  void recordLatency(ActionType type, uint64_t ns) {
+    latencyHist[static_cast<size_t>(type)].record(ns);
+  }
 
   void endWindow() {
     uint64_t durationNs = now_ns() - windowStart;
@@ -124,7 +137,8 @@ struct Metrics {
     cancels = 0;
     trades = 0;
     fills = 0;
-    latencyHist.reset();
+    for (auto &h : latencyHist)
+      h.reset();
     startWindow();
   }
 
@@ -176,28 +190,37 @@ struct Metrics {
       return ss.str();
     };
 
-    latencyHist.percentile();
+    LatencyHistogram combined;
+    for (auto &h : latencyHist)
+      hdr_add(combined.histogram, h.histogram);
+    combined.percentile();
+
     os << "[" << std::setw(6) << fmtCount(recordCount) << "] " << std::setw(8)
        << fmtThroughput(throughputPerSec) << " | "
-       << "p50=" << std::setw(6) << fmtLatency(latencyHist.p50) << " "
-       << "p99=" << std::setw(6) << fmtLatency(latencyHist.p99) << " "
-       << "p99.9=" << std::setw(6) << fmtLatency(latencyHist.p999) << " | "
+       << "p50=" << std::setw(6) << fmtLatency(combined.p50) << " "
+       << "p99=" << std::setw(6) << fmtLatency(combined.p99) << " "
+       << "p99.9=" << std::setw(6) << fmtLatency(combined.p999) << " | "
        << std::setw(6) << fmtMem(memoryUsedBytes) << "\n";
   }
 
   static void printCSVHeader(std::ostream &os) {
-    os << "records,throughput,p50_ns,p99_ns,p999_ns,memory_bytes,adds,modifies,"
-          "cancels,trades,fills\n";
+    os << "records,throughput,memory_bytes,adds,modifies,cancels,trades,fills";
+    for (auto *name : ACTION_NAMES)
+      os << "," << name << "_p50_ns," << name << "_p99_ns," << name
+         << "_p999_ns";
+    os << "\n";
   }
 
   void printCSVLine(std::ostream &os, uint64_t recordCount) {
     endWindow();
-    latencyHist.percentile();
     os << recordCount << "," << std::fixed << std::setprecision(0)
-       << throughputPerSec << "," << latencyHist.p50 << "," << latencyHist.p99
-       << "," << latencyHist.p999 << "," << memoryUsedBytes << "," << adds
-       << "," << modifies << "," << cancels << "," << trades << "," << fills
-       << "\n";
+       << throughputPerSec << "," << memoryUsedBytes << "," << adds << ","
+       << modifies << "," << cancels << "," << trades << "," << fills;
+    for (auto &h : latencyHist) {
+      h.percentile();
+      os << "," << h.p50 << "," << h.p99 << "," << h.p999;
+    }
+    os << "\n";
   }
 };
 

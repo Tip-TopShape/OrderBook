@@ -28,7 +28,7 @@ XNAS-*/
 # Analysis outputs
 *.xlsx
 *.png
-*.csv
+*/runs.csv
 
 # Python virtual environment
 dashboard/env/
